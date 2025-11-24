@@ -1,7 +1,8 @@
 x-airflow-common: &airflow-common
   build:
     context: ..
-    dockerfile: docker/airflow.Dockerfile
+    dockerfile: docker/Dockerfile
+    target: shopzada-airflow
   image: shopzada-airflow:latest
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -25,10 +26,7 @@ x-airflow-common: &airflow-common
 services:
   shopzada-db:
     container_name: shopzada-db
-    image: shopzada-db:latest
-    build:
-      context: ..
-      dockerfile: docker/postgres.Dockerfile
+    image: postgres:15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -48,6 +46,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: shopzada-ingest
     depends_on:
       shopzada-db:
         condition: service_healthy
@@ -64,10 +63,7 @@ services:
 
   shopzada-airflow-db:
     container_name: shopzada-airflow-db
-    image: shopzada-airflow-db:latest
-    build:
-      context: ..
-      dockerfile: docker/postgres.Dockerfile
+    image: postgres:15
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow

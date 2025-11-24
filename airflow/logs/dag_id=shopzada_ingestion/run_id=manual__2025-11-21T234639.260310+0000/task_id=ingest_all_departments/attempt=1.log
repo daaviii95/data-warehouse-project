@@ -1,0 +1,19 @@
+[2025-11-21T23:46:41.489+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs
+[2025-11-21T23:46:41.515+0000] {taskinstance.py:2612} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: shopzada_ingestion.ingest_all_departments manual__2025-11-21T23:46:39.260310+00:00 [queued]>
+[2025-11-21T23:46:41.523+0000] {taskinstance.py:2612} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: shopzada_ingestion.ingest_all_departments manual__2025-11-21T23:46:39.260310+00:00 [queued]>
+[2025-11-21T23:46:41.525+0000] {taskinstance.py:2865} INFO - Starting attempt 1 of 2
+[2025-11-21T23:46:41.537+0000] {taskinstance.py:2888} INFO - Executing <Task(PythonOperator): ingest_all_departments> on 2025-11-21 23:46:39.260310+00:00
+[2025-11-21T23:46:41.543+0000] {standard_task_runner.py:72} INFO - Started process 242 to run task
+[2025-11-21T23:46:41.545+0000] {standard_task_runner.py:104} INFO - Running: ['***', 'tasks', 'run', 'shopzada_ingestion', 'ingest_all_departments', 'manual__2025-11-21T23:46:39.260310+00:00', '--job-id', '7', '--raw', '--subdir', 'DAGS_FOLDER/shopzada_ingest.py', '--cfg-path', '/tmp/tmpqrio4qmv']
+[2025-11-21T23:46:41.550+0000] {standard_task_runner.py:105} INFO - Job 7: Subtask ingest_all_departments
+[2025-11-21T23:46:41.643+0000] {task_command.py:467} INFO - Running <TaskInstance: shopzada_ingestion.ingest_all_departments manual__2025-11-21T23:46:39.260310+00:00 [running]> on host be9f7b36f04b
+[2025-11-21T23:46:41.747+0000] {taskinstance.py:3131} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='shopzada-data' AIRFLOW_CTX_DAG_ID='shopzada_ingestion' AIRFLOW_CTX_TASK_ID='ingest_all_departments' AIRFLOW_CTX_EXECUTION_DATE='2025-11-21T23:46:39.260310+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2025-11-21T23:46:39.260310+00:00'
+[2025-11-21T23:46:41.753+0000] {taskinstance.py:731} INFO - ::endgroup::
+[2025-11-21T23:46:41.769+0000] {shopzada_ingest.py:55} INFO - Starting ShopZada ingestion via /opt/airflow/repo/scripts/ingest.py
+[2025-11-21T23:50:27.302+0000] {shopzada_ingest.py:57} INFO - ShopZada ingestion completed.
+[2025-11-21T23:50:27.318+0000] {python.py:240} INFO - Done. Returned value was: None
+[2025-11-21T23:50:27.374+0000] {taskinstance.py:340} INFO - ::group::Post task execution logs
+[2025-11-21T23:50:27.377+0000] {taskinstance.py:352} INFO - Marking task as SUCCESS. dag_id=shopzada_ingestion, task_id=ingest_all_departments, run_id=manual__2025-11-21T23:46:39.260310+00:00, execution_date=20251121T234639, start_date=20251121T234641, end_date=20251121T235027
+[2025-11-21T23:50:27.454+0000] {local_task_job_runner.py:266} INFO - Task exited with return code 0
+[2025-11-21T23:50:27.519+0000] {taskinstance.py:3900} INFO - 0 downstream tasks scheduled from follow-on schedule check
+[2025-11-21T23:50:27.523+0000] {local_task_job_runner.py:245} INFO - ::endgroup::

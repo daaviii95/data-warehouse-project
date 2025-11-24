@@ -30,13 +30,8 @@ DB_NAME = os.environ.get("POSTGRES_DB", "shopzada")
 DB_USER = os.environ.get("POSTGRES_USER", "postgres")
 DB_PASS = os.environ.get("POSTGRES_PASSWORD", "postgres")
 
-STAGING_TABLES = [
-    "stg_business_department_product_list_xlsx",
-    "stg_customer_management_department_user_data_json",
-    "stg_enterprise_department_order_with_merchant_data3_csv",
-    "stg_marketing_department_transactional_campaign_data_csv",
-    "stg_operations_department_order_data_20211001_20220101_csv",
-]
+# STAGING_TABLES is now dynamically discovered in snapshot_staging_tables()
+# This list was kept for reference but is no longer used
 
 
 def run_shopzada_ingestion(**_context) -> None:
@@ -58,21 +53,30 @@ def run_shopzada_ingestion(**_context) -> None:
 
 
 def snapshot_staging_tables(**_context) -> None:
-    """Emit row-count telemetry for key Kimball staging tables."""
-    from sqlalchemy import create_engine, text
+    """Emit row-count telemetry for all Kimball staging tables."""
+    from sqlalchemy import create_engine, text, inspect
 
     engine_url = (
         f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     )
     engine = create_engine(engine_url)
 
+    # Dynamically discover all staging tables (stg_*)
+    inspector = inspect(engine)
+    all_tables = inspector.get_table_names()
+    staging_tables = sorted([t for t in all_tables if t.startswith("stg_")])
+    
+    if not staging_tables:
+        logging.warning("No staging tables found. Run ingestion first.")
+        return
+
     metrics = {}
     with engine.begin() as conn:
-        for table in STAGING_TABLES:
+        for table in staging_tables:
             query = text(f'SELECT COUNT(*) AS cnt FROM "{table}"')
             metrics[table] = conn.execute(query).scalar_one()
 
-    logging.info("Kimball staging snapshot: %s", metrics)
+    logging.info(f"Kimball staging snapshot ({len(staging_tables)} tables): {metrics}")
 
 
 default_args = {
@@ -90,7 +94,7 @@ with DAG(
     catchup=False,
     max_active_runs=1,
     tags=["shopzada", "kimball", "staging"],
-    description="Daily ingestion of ShopZada source data into Kimball staging tables.",
+    description="Daily ingestion of ShopZada source data into Kimball staging tables (Raw → Ingest → Database).",
 ) as dag:
     validate_data_mount = BashOperator(
         task_id="validate_data_mount",
@@ -109,4 +113,5 @@ with DAG(
     )
 
     validate_data_mount >> run_ingestion >> snapshot_tables
+
 

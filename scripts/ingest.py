@@ -11,8 +11,8 @@ Unified ingestion script for Week 2.
 import os
 import re
 import sys
-import time
 import logging
+import hashlib
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -43,13 +43,25 @@ def sanitize_table_name(path: Path) -> str:
     """
     Create table name based on relative path: stg_<folder>_<filename_noext>
     non-alphanum -> underscore, all lower-case.
+    Truncates to 63 characters (PostgreSQL identifier limit).
     """
     rel = path.relative_to(Path(DATA_DIR))
     parts = list(rel.parts)
     # if file at root, parts may be just the file — include parent folder if exists
     name = "_".join(parts)
     name = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").lower()
-    return f"stg_{name}"
+    table_name = f"stg_{name}"
+    
+    # PostgreSQL identifier limit is 63 characters
+    if len(table_name) > 63:
+        # Truncate and add hash suffix for uniqueness
+        name_hash = hashlib.md5(name.encode()).hexdigest()[:8]
+        max_base_len = 63 - len(f"stg_{name_hash}") - 1
+        truncated_name = name[:max_base_len]
+        table_name = f"stg_{truncated_name}_{name_hash}"
+        logging.warning(f"Table name truncated to 63 chars: {table_name} (original: stg_{name[:50]}...)")
+    
+    return table_name
 
 def drop_unnamed(df: pd.DataFrame) -> pd.DataFrame:
     cols_to_drop = [c for c in df.columns if re.match(r"^Unnamed", str(c))]
@@ -305,12 +317,47 @@ def main():
         logging.error("DATA_DIR does not exist: %s", DATA_DIR)
         sys.exit(1)
 
-    # walk files
+    # Exclude staging_parquet directory (output directory, not source)
+    # This directory may not exist if it was deleted - that's fine, we'll skip it
+    exclude_dirs = {"staging_parquet"}
+    
+    # walk files, excluding output directories
+    # Use os.walk for better error handling with deleted directories
     file_count = 0
-    for p in data_root.rglob("*"):
-        if p.is_file():
-            file_count += 1
-            process_file(p)
+    skipped_count = 0
+    
+    try:
+        for root, dirs, files in os.walk(data_root):
+            # Remove excluded directories from dirs list to prevent scanning them
+            # This prevents os.walk from descending into excluded directories
+            # If directory doesn't exist, it won't be in dirs list anyway
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
+            for file in files:
+                file_path = Path(root) / file
+                try:
+                    # Skip files in excluded directories - check path string (safety check)
+                    path_str = str(file_path)
+                    if any(excluded in path_str for excluded in exclude_dirs):
+                        logging.debug("Skipping file in excluded directory: %s", file_path)
+                        skipped_count += 1
+                        continue
+                    
+                    if file_path.is_file():
+                        file_count += 1
+                        process_file(file_path)
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    # Skip files that can't be accessed (e.g., deleted during scan)
+                    logging.debug("Skipping inaccessible file %s: %s", file_path, e)
+                    continue
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        # Handle case where a directory was deleted during or before scanning
+        # This is normal if staging_parquet was deleted - os.walk will skip it automatically
+        logging.debug("Directory access error (may be from deleted staging_parquet): %s", e)
+        logging.info("Continuing with files that were successfully processed...")
+    
+    if skipped_count > 0:
+        logging.info("Skipped %d files from excluded directories", skipped_count)
 
     logging.info("Processed %d files from %s", file_count, DATA_DIR)
 

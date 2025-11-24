@@ -1,0 +1,17 @@
+[2025-11-22T00:40:59.287+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs
+[2025-11-22T00:40:59.309+0000] {taskinstance.py:2612} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: shopzada_all_depts_parquet.trigger_business_dept manual__2025-11-22T00:40:57.869108+00:00 [queued]>
+[2025-11-22T00:40:59.322+0000] {taskinstance.py:2612} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: shopzada_all_depts_parquet.trigger_business_dept manual__2025-11-22T00:40:57.869108+00:00 [queued]>
+[2025-11-22T00:40:59.323+0000] {taskinstance.py:2865} INFO - Starting attempt 1 of 2
+[2025-11-22T00:40:59.337+0000] {taskinstance.py:2888} INFO - Executing <Task(TriggerDagRunOperator): trigger_business_dept> on 2025-11-22 00:40:57.869108+00:00
+[2025-11-22T00:40:59.346+0000] {standard_task_runner.py:72} INFO - Started process 321 to run task
+[2025-11-22T00:40:59.351+0000] {standard_task_runner.py:104} INFO - Running: ['***', 'tasks', 'run', 'shopzada_all_depts_parquet', 'trigger_business_dept', 'manual__2025-11-22T00:40:57.869108+00:00', '--job-id', '25', '--raw', '--subdir', 'DAGS_FOLDER/shopzada_all_depts_parquet.py', '--cfg-path', '/tmp/tmplohq6yem']
+[2025-11-22T00:40:59.358+0000] {standard_task_runner.py:105} INFO - Job 25: Subtask trigger_business_dept
+[2025-11-22T00:40:59.460+0000] {task_command.py:467} INFO - Running <TaskInstance: shopzada_all_depts_parquet.trigger_business_dept manual__2025-11-22T00:40:57.869108+00:00 [running]> on host 84e716485d21
+[2025-11-22T00:40:59.565+0000] {taskinstance.py:3131} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='shopzada-data' AIRFLOW_CTX_DAG_ID='shopzada_all_depts_parquet' AIRFLOW_CTX_TASK_ID='trigger_business_dept' AIRFLOW_CTX_EXECUTION_DATE='2025-11-22T00:40:57.869108+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2025-11-22T00:40:57.869108+00:00'
+[2025-11-22T00:40:59.567+0000] {taskinstance.py:731} INFO - ::endgroup::
+[2025-11-22T00:40:59.671+0000] {trigger_dagrun.py:257} INFO - Waiting for shopzada_business_dept_parquet on 2025-11-22 00:40:59.586512+00:00 to become allowed state ['success'] ...
+[2025-11-22T00:42:05.019+0000] {trigger_dagrun.py:271} INFO - shopzada_business_dept_parquet finished with allowed state success
+[2025-11-22T00:42:05.051+0000] {taskinstance.py:340} INFO - ::group::Post task execution logs
+[2025-11-22T00:42:05.054+0000] {taskinstance.py:352} INFO - Marking task as SUCCESS. dag_id=shopzada_all_depts_parquet, task_id=trigger_business_dept, run_id=manual__2025-11-22T00:40:57.869108+00:00, execution_date=20251122T004057, start_date=20251122T004059, end_date=20251122T004205
+[2025-11-22T00:42:05.120+0000] {local_task_job_runner.py:266} INFO - Task exited with return code 0
+[2025-11-22T00:42:05.138+0000] {local_task_job_runner.py:245} INFO - ::endgroup::
