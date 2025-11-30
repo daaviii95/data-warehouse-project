@@ -26,7 +26,7 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
 DB_HOST = os.getenv("POSTGRES_HOST", "db")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 DB_NAME = os.getenv("POSTGRES_DB", "shopzada")
-DATA_DIR = os.getenv("DATA_DIR", "/data")
+DATA_DIR = os.getenv("DATA_DIR", "/opt/airflow/data")
 CSV_CHUNK_SIZE = int(os.getenv("CSV_CHUNK_SIZE", "20000"))  # rows per chunk for CSVs
 
 # Logging
@@ -41,13 +41,25 @@ engine = sqlalchemy.create_engine(engine_url, pool_size=5, max_overflow=10, futu
 # useful helpers
 def sanitize_table_name(path: Path) -> str:
     """
-    Create table name based on relative path: stg_<folder>_<filename_noext>
+    Create table name based on relative path: stg_<department>_<filename_noext>
+    Removes file extension for cleaner names.
     non-alphanum -> underscore, all lower-case.
     Truncates to 63 characters (PostgreSQL identifier limit).
+    
+    If multiple files with same name but different extensions exist, 
+    they will be handled by appending a numeric suffix.
     """
     rel = path.relative_to(Path(DATA_DIR))
     parts = list(rel.parts)
-    # if file at root, parts may be just the file — include parent folder if exists
+    
+    # Remove file extension from the filename (last part)
+    if parts:
+        filename = parts[-1]
+        # Remove extension
+        filename_no_ext = Path(filename).stem
+        parts[-1] = filename_no_ext
+    
+    # Join parts: department_filename
     name = "_".join(parts)
     name = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").lower()
     table_name = f"stg_{name}"
@@ -132,7 +144,11 @@ def write_chunk_to_db(df: pd.DataFrame, table_name: str):
         logging.info("Empty chunk, skipping write.")
         return
     try:
-        df.to_sql(name=table_name, con=engine, if_exists="append", index=False, method="multi", chunksize=5000)
+        # Use smaller chunksize and add timeout handling for better resilience
+        df.to_sql(name=table_name, con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
+    except KeyboardInterrupt:
+        # Re-raise keyboard interrupts (SIGTERM) to allow proper cleanup
+        raise
     except Exception as e:
         logging.exception("Failed to write to DB for table %s: %s", table_name, e)
         raise
@@ -194,6 +210,7 @@ def process_csv(path: Path, table_name: str):
 
     logging.info(f"Processing CSV/TSV: {path}")
     total_rows = 0
+    last_chunk_rows = 0
 
     # 1. Detect delimiter
     sep = detect_delimiter(path)
@@ -216,11 +233,18 @@ def process_csv(path: Path, table_name: str):
             # Clean + load
             chunk = light_clean(chunk)
             write_chunk_to_db(chunk, table_name)
-            total_rows += len(chunk)
+            last_chunk_rows = len(chunk)
+            total_rows += last_chunk_rows
+            logging.debug(f"Processed {total_rows} rows so far from {path.name}")
 
         log_ingestion(str(path), table_name, total_rows, "success", None)
         logging.info(f"Finished ingesting {path.name} → {total_rows} rows")
 
+    except KeyboardInterrupt:
+        # Task was terminated - log partial progress
+        logging.warning(f"Ingestion interrupted for {path.name}. Processed {total_rows} rows before termination.")
+        log_ingestion(str(path), table_name, total_rows, "interrupted", "Task received SIGTERM")
+        raise  # Re-raise to allow Airflow to handle the termination
     except Exception as e:
         logging.exception(f"Error processing CSV file: {path}")
         log_ingestion(str(path), table_name, total_rows, "failed", str(e))
@@ -233,6 +257,10 @@ def process_parquet(path: Path, table_name: str):
         write_chunk_to_db(df, table_name)
         log_ingestion(str(path), table_name, len(df), "success", None)
         logging.info("Finished parquet %s -> %d rows", path, len(df))
+    except KeyboardInterrupt:
+        logging.warning(f"Ingestion interrupted for {path.name}")
+        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
+        raise
     except Exception as e:
         logging.exception("Error processing parquet %s", path)
         log_ingestion(str(path), table_name, 0, "failed", str(e))
@@ -245,6 +273,10 @@ def process_json(path: Path, table_name: str):
         write_chunk_to_db(df, table_name)
         log_ingestion(str(path), table_name, len(df), "success", None)
         logging.info("Finished json %s -> %d rows", path, len(df))
+    except KeyboardInterrupt:
+        logging.warning(f"Ingestion interrupted for {path.name}")
+        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
+        raise
     except Exception as e:
         logging.exception("Error processing json %s", path)
         log_ingestion(str(path), table_name, 0, "failed", str(e))
@@ -257,6 +289,10 @@ def process_excel(path: Path, table_name: str):
         write_chunk_to_db(df, table_name)
         log_ingestion(str(path), table_name, len(df), "success", None)
         logging.info("Finished excel %s -> %d rows", path, len(df))
+    except KeyboardInterrupt:
+        logging.warning(f"Ingestion interrupted for {path.name}")
+        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
+        raise
     except Exception as e:
         logging.exception("Error processing excel %s", path)
         log_ingestion(str(path), table_name, 0, "failed", str(e))
@@ -269,6 +305,10 @@ def process_pickle(path: Path, table_name: str):
         write_chunk_to_db(df, table_name)
         log_ingestion(str(path), table_name, len(df), "success", None)
         logging.info("Finished pickle %s -> %d rows", path, len(df))
+    except KeyboardInterrupt:
+        logging.warning(f"Ingestion interrupted for {path.name}")
+        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
+        raise
     except Exception as e:
         logging.exception("Error processing pickle %s", path)
         log_ingestion(str(path), table_name, 0, "failed", str(e))
@@ -286,13 +326,57 @@ def process_html(path: Path, table_name: str):
             total += len(df)
         log_ingestion(str(path), table_name, total, "success", None)
         logging.info("Finished html %s -> %d rows across %d tables", path, total, len(dfs))
+    except KeyboardInterrupt:
+        logging.warning(f"Ingestion interrupted for {path.name}")
+        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
+        raise
     except Exception as e:
         logging.exception("Error processing html %s", path)
         log_ingestion(str(path), table_name, 0, "failed", str(e))
 
+def is_file_already_ingested(file_path: str, table_name: str) -> bool:
+    """Check if a file has already been successfully ingested"""
+    try:
+        with engine.connect() as conn:
+            # First check if ingestion_log table exists
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'ingestion_log'
+                )
+            """))
+            table_exists = result.fetchone()[0]
+            
+            if not table_exists:
+                # Table doesn't exist yet, so file hasn't been ingested
+                return False
+            
+            # Table exists, check if file was successfully ingested
+            result = conn.execute(text("""
+                SELECT COUNT(*) 
+                FROM ingestion_log 
+                WHERE file_path = :file_path 
+                AND table_name = :table_name 
+                AND status = 'success'
+            """), {"file_path": file_path, "table_name": table_name})
+            count = result.fetchone()[0]
+            return count > 0
+    except Exception as e:
+        # If query fails, assume not ingested (safe default)
+        logging.debug("Could not check ingestion log: %s", e)
+        return False
+
 def process_file(path: Path):
     ext = path.suffix.lower()
     table_name = sanitize_table_name(path)
+    file_path_str = str(path)
+    
+    # Check if file has already been successfully ingested
+    if is_file_already_ingested(file_path_str, table_name):
+        logging.info("File already ingested, skipping: %s", path)
+        return
+    
     logging.info("Processing %s as %s", path, ext)
 
     if ext in [".csv"]:

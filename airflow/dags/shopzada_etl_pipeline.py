@@ -1,214 +1,344 @@
 """
-ShopZada Kimball ETL Pipeline DAG.
+ShopZada ETL Pipeline DAG
+Kimball Methodology - Star Schema Data Warehouse
 
-This DAG orchestrates the complete ETL process:
-1. Create Kimball dimensional model schema
-2. Populate Date Dimension
-3. Load Dimension Tables (SCD Type 1)
-4. Load Fact Tables
-5. Validate and snapshot results
+This DAG orchestrates the complete ETL pipeline:
+1. Ingestion: Load data from various sources into staging tables
+2. Transformation: Transform staging data into dimensional model
+3. Data Quality: Validate data integrity and quality
+4. Loading: Load into fact and dimension tables
 """
 
-from __future__ import annotations
-
-import logging
-import os
-import subprocess
-from datetime import datetime, timedelta
-from pathlib import Path
-
 from airflow import DAG
-from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from airflow.utils.trigger_rule import TriggerRule
+from airflow.operators.bash import BashOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.utils.dates import days_ago
+from datetime import datetime, timedelta
+import sys
+import os
 
-SHOPZADA_REPO_ROOT = Path(os.environ.get("SHOPZADA_REPO_ROOT", "/opt/airflow/repo"))
+# Add scripts directory to path
+sys.path.insert(0, '/opt/airflow/repo/scripts')
 
-DB_HOST = os.environ.get("POSTGRES_HOST", "shopzada-db")
-DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
-DB_NAME = os.environ.get("POSTGRES_DB", "shopzada")
-DB_USER = os.environ.get("POSTGRES_USER", "postgres")
-DB_PASS = os.environ.get("POSTGRES_PASSWORD", "postgres")
-
-
-def create_kimball_schema(**_context) -> None:
-    """Create Kimball dimensional model schema."""
-    schema_file = SHOPZADA_REPO_ROOT / "sql" / "kimball_schema.sql"
-    
-    if not schema_file.exists():
-        raise FileNotFoundError(f"Schema file not found: {schema_file}")
-    
-    import subprocess
-    cmd = [
-        "psql",
-        f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
-        "-f", str(schema_file)
-    ]
-    
-    logging.info(f"Creating Kimball schema from {schema_file}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        logging.error(f"Schema creation failed: {result.stderr}")
-        raise RuntimeError(f"Schema creation failed: {result.stderr}")
-    
-    logging.info("✓ Kimball schema created successfully")
-
-
-def populate_date_dimension(**_context) -> None:
-    """Populate Date Dimension table."""
-    date_file = SHOPZADA_REPO_ROOT / "sql" / "populate_dim_date.sql"
-    
-    if not date_file.exists():
-        raise FileNotFoundError(f"Date dimension file not found: {date_file}")
-    
-    import subprocess
-    cmd = [
-        "psql",
-        f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
-        "-f", str(date_file)
-    ]
-    
-    logging.info(f"Populating Date Dimension from {date_file}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        logging.error(f"Date dimension population failed: {result.stderr}")
-        raise RuntimeError(f"Date dimension population failed: {result.stderr}")
-    
-    logging.info("✓ Date Dimension populated successfully")
-
-
-def load_dimensions(**_context) -> None:
-    """Load all dimension tables from staging."""
-    script = SHOPZADA_REPO_ROOT / "scripts" / "etl_dimensions.py"
-    
-    if not script.exists():
-        raise FileNotFoundError(f"ETL script not found: {script}")
-    
-    env = os.environ.copy()
-    env["POSTGRES_HOST"] = DB_HOST
-    env["POSTGRES_PORT"] = DB_PORT
-    env["POSTGRES_DB"] = DB_NAME
-    env["POSTGRES_USER"] = DB_USER
-    env["POSTGRES_PASSWORD"] = DB_PASS
-    
-    logging.info("Loading dimension tables...")
-    subprocess.run(["python", str(script)], check=True, env=env)
-    logging.info("✓ Dimension tables loaded")
-
-
-def load_facts(**_context) -> None:
-    """Load all fact tables from staging."""
-    script = SHOPZADA_REPO_ROOT / "scripts" / "etl_facts.py"
-    
-    if not script.exists():
-        raise FileNotFoundError(f"ETL script not found: {script}")
-    
-    env = os.environ.copy()
-    env["POSTGRES_HOST"] = DB_HOST
-    env["POSTGRES_PORT"] = DB_PORT
-    env["POSTGRES_DB"] = DB_NAME
-    env["POSTGRES_USER"] = DB_USER
-    env["POSTGRES_PASSWORD"] = DB_PASS
-    
-    logging.info("Loading fact tables...")
-    subprocess.run(["python", str(script)], check=True, env=env)
-    logging.info("✓ Fact tables loaded")
-
-
-def validate_etl(**_context) -> None:
-    """Validate ETL results and generate summary."""
-    from sqlalchemy import create_engine, text
-    
-    engine_url = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    engine = create_engine(engine_url)
-    
-    metrics = {}
-    
-    with engine.begin() as conn:
-        # Count dimension records
-        for dim in ['dim_date', 'dim_product', 'dim_customer', 'dim_merchant', 'dim_staff', 'dim_campaign']:
-            result = conn.execute(text(f"SELECT COUNT(*) FROM {dim}"))
-            metrics[dim] = result.scalar_one()
+def execute_sql_file(sql_file_path):
+    """Helper function to execute SQL file"""
+    try:
+        hook = PostgresHook(postgres_conn_id='shopzada_postgres')
+        full_path = f'/opt/airflow/repo/{sql_file_path}'
         
-        # Count fact records
-        for fact in ['fact_sales', 'fact_campaign_performance']:
-            result = conn.execute(text(f"SELECT COUNT(*) FROM {fact}"))
-            metrics[fact] = result.scalar_one()
+        if not os.path.exists(full_path):
+            raise FileNotFoundError(f"SQL file not found: {full_path}")
         
-        # Get latest ETL log
-        result = conn.execute(text("""
-            SELECT etl_name, status, rows_inserted, duration_seconds
-            FROM etl_log
-            ORDER BY created_at DESC
-            LIMIT 10
-        """))
-        etl_logs = result.fetchall()
-    
-    logging.info("=" * 60)
-    logging.info("ETL Validation Summary:")
-    logging.info("=" * 60)
-    logging.info("Dimension Tables:")
-    for dim, count in metrics.items():
-        if dim.startswith('dim_'):
-            logging.info(f"  {dim}: {count:,} records")
-    
-    logging.info("Fact Tables:")
-    for fact, count in metrics.items():
-        if fact.startswith('fact_'):
-            logging.info(f"  {fact}: {count:,} records")
-    
-    logging.info("Recent ETL Runs:")
-    for log in etl_logs:
-        logging.info(f"  {log[0]}: {log[1]} - {log[2]:,} rows in {log[3]}s")
-    
-    logging.info("=" * 60)
-
+        with open(full_path, 'r') as f:
+            sql = f.read()
+        
+        if not sql.strip():
+            raise ValueError(f"SQL file is empty: {full_path}")
+        
+        # Execute SQL using connection to handle dollar-quoted strings properly
+        # Parse SQL to split by semicolons while respecting DO $$ ... END $$; blocks
+        statements = []
+        i = 0
+        current_statement = ""
+        in_dollar_quote = False
+        dollar_tag = None
+        
+        while i < len(sql):
+            char = sql[i]
+            
+            # Check for start of dollar quote
+            if char == '$' and not in_dollar_quote:
+                # Look ahead to find the tag (could be $$ or $tag$)
+                tag_start = i
+                tag_end = i + 1
+                
+                # Check if it's $$ (empty tag)
+                if tag_end < len(sql) and sql[tag_end] == '$':
+                    dollar_tag = '$$'
+                    in_dollar_quote = True
+                    current_statement += '$$'
+                    i = tag_end + 1
+                    continue
+                
+                # Otherwise, find the tag (e.g., $tag$)
+                while tag_end < len(sql) and sql[tag_end] != '$':
+                    tag_end += 1
+                if tag_end < len(sql):
+                    dollar_tag = sql[tag_start:tag_end+1]
+                    in_dollar_quote = True
+                    current_statement += dollar_tag
+                    i = tag_end + 1
+                    continue
+            
+            # Check for end of dollar quote
+            if in_dollar_quote:
+                if sql[i:i+len(dollar_tag)] == dollar_tag:
+                    current_statement += dollar_tag
+                    i += len(dollar_tag)
+                    in_dollar_quote = False
+                    dollar_tag = None
+                    continue
+            
+            # Check for semicolon (statement separator) - only if not in dollar quote
+            if char == ';' and not in_dollar_quote:
+                current_statement += char
+                stmt = current_statement.strip()
+                if stmt:
+                    statements.append(stmt)
+                current_statement = ""
+                i += 1
+                continue
+            
+            current_statement += char
+            i += 1
+        
+        # Add remaining statement if any
+        if current_statement.strip():
+            statements.append(current_statement.strip())
+        
+        # Execute each statement
+        conn = hook.get_conn()
+        try:
+            cursor = conn.cursor()
+            try:
+                for statement in statements:
+                    if statement.strip():
+                        cursor.execute(statement)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+    except Exception as e:
+        import logging
+        logging.error(f"Error executing SQL file {sql_file_path}: {e}")
+        raise
 
 default_args = {
-    "owner": "shopzada-data",
-    "depends_on_past": False,
-    "retries": 1,
-    "retry_delay": timedelta(minutes=5),
+    'owner': 'shopzada-data-engineering',
+    'depends_on_past': False,
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
 }
 
+def run_ingestion():
+    """Run the ingestion script - now idempotent (skips already-ingested files)"""
+    import ingest
+    # The ingestion script now checks ingestion_log to skip already-ingested files
+    ingest.main()
+
+def run_data_quality_checks():
+    """Run data quality validation checks"""
+    import data_quality
+    data_quality.run_all_checks()
+
+# SQL execution wrapper functions (needed because lambdas can't be serialized by Airflow)
+def exec_sql_01():
+    execute_sql_file('sql/01_create_date_dimension.sql')
+
+def exec_sql_02():
+    execute_sql_file('sql/02_load_dim_campaign.sql')
+
+def exec_sql_03():
+    execute_sql_file('sql/03_load_dim_product.sql')
+
+def exec_sql_04():
+    execute_sql_file('sql/04_load_dim_user.sql')
+
+def exec_sql_05():
+    execute_sql_file('sql/05_load_dim_staff.sql')
+
+def exec_sql_06():
+    execute_sql_file('sql/06_load_dim_merchant.sql')
+
+def exec_sql_07():
+    execute_sql_file('sql/07_load_dim_user_job.sql')
+
+def exec_sql_08():
+    execute_sql_file('sql/08_load_dim_credit_card.sql')
+
+def exec_sql_09():
+    execute_sql_file('sql/09_load_fact_orders.sql')
+
+def exec_sql_10():
+    execute_sql_file('sql/10_load_fact_line_items.sql')
+
+def exec_sql_11():
+    execute_sql_file('sql/11_load_fact_campaign_transactions.sql')
+
+def exec_sql_12():
+    execute_sql_file('sql/12_create_analytical_views.sql')
+
 with DAG(
-    dag_id="shopzada_etl_pipeline",
+    'shopzada_etl_pipeline',
     default_args=default_args,
-    start_date=datetime(2025, 1, 1),
-    schedule_interval=None,  # Manual trigger or can be scheduled
+    description='ShopZada Complete ETL Pipeline - Kimball Star Schema',
+    schedule_interval='@daily',
+    start_date=days_ago(1),
     catchup=False,
-    max_active_runs=1,
-    tags=["shopzada", "kimball", "etl", "dimensional"],
-    description="Complete Kimball ETL pipeline: Schema → Dimensions → Facts → Validation",
+    tags=['shopzada', 'etl', 'kimball', 'dwh'],
 ) as dag:
-    create_schema = PythonOperator(
-        task_id="create_kimball_schema",
-        python_callable=create_kimball_schema,
+
+    # Task 1: Data Ingestion (idempotent - skips already-ingested files)
+    ingest_data = PythonOperator(
+        task_id='ingest_data_to_staging',
+        python_callable=run_ingestion,
+        doc_md="""
+        ## Data Ingestion Task (Idempotent)
+        
+        Ingests all data files from the `/data` directory into PostgreSQL staging tables.
+        Supports multiple file formats: CSV, Parquet, JSON, Excel, Pickle, HTML.
+        
+        Creates staging tables with naming convention: `stg_<department>_<filename>`
+        
+        **Idempotent**: Automatically skips files that have already been successfully ingested
+        (checked via `ingestion_log` table). This means you can safely re-run this task
+        without re-ingesting all data.
+        """
     )
-    
-    populate_date = PythonOperator(
-        task_id="populate_date_dimension",
-        python_callable=populate_date_dimension,
+
+    # Task 2: Create Date Dimension (must be done before fact tables)
+    create_date_dimension = PythonOperator(
+        task_id='create_date_dimension',
+        python_callable=exec_sql_01,
+        doc_md="""
+        ## Date Dimension Creation
+        
+        Creates and populates the date dimension table (dim_date).
+        This is a standard dimension in Kimball methodology for time-based analysis.
+        """
     )
-    
-    load_dims = PythonOperator(
-        task_id="load_dimension_tables",
-        python_callable=load_dimensions,
+
+    # Task 3: Transform and Load Dimension Tables
+    load_dim_campaign = PythonOperator(
+        task_id='load_dim_campaign',
+        python_callable=exec_sql_02,
     )
-    
-    load_facts = PythonOperator(
-        task_id="load_fact_tables",
-        python_callable=load_facts,
+
+    load_dim_product = PythonOperator(
+        task_id='load_dim_product',
+        python_callable=exec_sql_03,
     )
-    
-    validate = PythonOperator(
-        task_id="validate_etl_results",
-        python_callable=validate_etl,
-        trigger_rule=TriggerRule.ALL_SUCCESS,
+
+    load_dim_user = PythonOperator(
+        task_id='load_dim_user',
+        python_callable=exec_sql_04,
     )
+
+    load_dim_staff = PythonOperator(
+        task_id='load_dim_staff',
+        python_callable=exec_sql_05,
+    )
+
+    load_dim_merchant = PythonOperator(
+        task_id='load_dim_merchant',
+        python_callable=exec_sql_06,
+    )
+
+    load_dim_user_job = PythonOperator(
+        task_id='load_dim_user_job',
+        python_callable=exec_sql_07,
+    )
+
+    load_dim_credit_card = PythonOperator(
+        task_id='load_dim_credit_card',
+        python_callable=exec_sql_08,
+    )
+
+    # Task 4: Transform and Load Fact Tables (depend on dimensions)
+    load_fact_orders = PythonOperator(
+        task_id='load_fact_orders',
+        python_callable=exec_sql_09,
+    )
+
+    load_fact_line_items = PythonOperator(
+        task_id='load_fact_line_items',
+        python_callable=exec_sql_10,
+    )
+
+    load_fact_campaign_transactions = PythonOperator(
+        task_id='load_fact_campaign_transactions',
+        python_callable=exec_sql_11,
+    )
+
+    # Task 5: Data Quality Checks
+    data_quality_checks = PythonOperator(
+        task_id='run_data_quality_checks',
+        python_callable=run_data_quality_checks,
+        doc_md="""
+        ## Data Quality Validation
+        
+        Runs comprehensive data quality checks:
+        - Referential integrity
+        - Null value checks
+        - Duplicate detection
+        - Data type validation
+        """
+    )
+
+    # Task 6: Create Analytical Views
+    create_analytical_views = PythonOperator(
+        task_id='create_analytical_views',
+        python_callable=exec_sql_12,
+        doc_md="""
+        ## Analytical Views Creation
+        
+        Creates SQL views optimized for business intelligence and reporting:
+        - Campaign performance metrics
+        - Merchant performance analysis
+        - Customer segment revenue analysis
+        """
+    )
+
+    # Define task dependencies (Kimball ETL flow)
+    ingest_data >> create_date_dimension
     
-    # ETL Pipeline Flow
-    create_schema >> populate_date >> load_dims >> load_facts >> validate
+    # Dimensions can be loaded in parallel
+    create_date_dimension >> [
+        load_dim_campaign,
+        load_dim_product,
+        load_dim_user,
+        load_dim_staff,
+        load_dim_merchant
+    ]
+    
+    # User-dependent dimensions
+    load_dim_user >> [
+        load_dim_user_job,
+        load_dim_credit_card
+    ]
+    
+    # Fact tables depend on all dimensions
+    all_dimensions = [
+        load_dim_campaign,
+        load_dim_product,
+        load_dim_user,
+        load_dim_staff,
+        load_dim_merchant,
+        load_dim_user_job,
+        load_dim_credit_card
+    ]
+    
+    all_facts = [
+        load_fact_orders,
+        load_fact_line_items,
+        load_fact_campaign_transactions
+    ]
+    
+    # Set dependencies: all dimensions must complete before facts
+    for dim in all_dimensions:
+        dim >> all_facts
+    
+    # Data quality and views depend on fact tables
+    for fact in all_facts:
+        fact >> data_quality_checks
+    
+    data_quality_checks >> create_analytical_views
 

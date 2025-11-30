@@ -41,28 +41,27 @@ This checks:
 
 ## Dockerized Staging Layer
 
-- Build and run the ShopZada images:
-  ```powershell
-  docker compose -f docker/docker-compose.yml up --build shopzada-ingest
-  ```
+- **Ingestion is now orchestrated via Airflow DAGs** (see Airflow Orchestration section below)
 - Custom images:
   - `shopzada-db:latest` – Postgres 15 with the `shopzada` warehouse database.
-  - `shopzada-ingest:latest` – runs `scripts/ingest.py` against the mounted `data/` folder.
-- Data sources must live in `./data`; the compose file mounts it read-only into each container.
+  - `shopzada-airflow:latest` – Airflow container with ShopZada dependencies installed.
+- Data sources must live in `./data`; the compose file mounts it read-only into Airflow containers.
 
 ## Airflow Orchestration
 
+- **All ingestion is now done via Airflow DAGs** (no standalone ingestion service)
 - DAGs live in `airflow/dags`. Start the full stack (Postgres + Airflow scheduler/webserver) and open the UI on http://localhost:8080:
   ```powershell
-  docker compose -f docker/docker-compose.yml up --build shopzada-airflow-webserver shopzada-airflow-scheduler
+  docker compose -f docker/docker-compose.yml up --build shopzada-airflow-webserver shopzada-airflow-scheduler shopzada-db
   ```
   The first run will also start `shopzada-airflow-init` to apply migrations and provision the default admin user (`admin` / `admin`).
 
 ### Main Ingestion DAG (`shopzada_ingestion`)
 - **Purpose**: Raw data ingestion to database
 - **Workflow**: **Raw → Ingest → Database**
+- **How to run**: Trigger the DAG in Airflow UI (http://localhost:8080) or wait for scheduled execution (@daily)
   1. **Validate**: Checks data directory is mounted
-  2. **Ingestion**: Calls `scripts/ingest.py` to load all source files into Postgres staging tables (`stg_*`)
+  2. **Ingestion**: Directly imports and calls `scripts/ingest.py` to load all source files into Postgres staging tables (`stg_*`)
   3. **Snapshot**: Records row counts for monitoring and validation
 
 ### Optional: Department-Specific Parquet Export DAGs
@@ -101,11 +100,11 @@ Get-Content sql/kimball_schema.sql | docker exec -i shopzada-db psql -U postgres
 # 2. Populate date dimension
 Get-Content sql/populate_dim_date.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
 
-# 3. Load dimensions
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest python /opt/airflow/repo/scripts/etl_dimensions.py
+# 3. Load dimensions (via Airflow container)
+docker exec shopzada-airflow-scheduler python /opt/airflow/repo/scripts/etl_dimensions.py
 
-# 4. Load facts
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest python /opt/airflow/repo/scripts/etl_facts.py
+# 4. Load facts (via Airflow container)
+docker exec shopzada-airflow-scheduler python /opt/airflow/repo/scripts/etl_facts.py
 
 # 5. Create presentation views
 Get-Content sql/presentation_layer_views.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
@@ -145,8 +144,9 @@ Get-Content sql/reset.sql | docker exec -i shopzada-db psql -U postgres -d shopz
 # 2. Clear Parquet exports (optional, if using Parquet export DAGs)
 # Remove-Item -Path "data/staging_parquet/*.parquet" -Force -ErrorAction SilentlyContinue
 
-# 3. Re-run ingestion
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest
+# 3. Re-run ingestion via Airflow DAG
+# Open Airflow UI at http://localhost:8080 and trigger the shopzada_ingestion DAG
+# Or use: docker exec shopzada-airflow-scheduler airflow dags trigger shopzada_ingestion
 ```
 
 **Bash/Linux:**
@@ -157,8 +157,9 @@ docker exec -i shopzada-db psql -U postgres -d shopzada < sql/reset.sql
 # 2. Clear Parquet exports (optional)
 rm -f data/staging_parquet/*.parquet
 
-# 3. Re-run ingestion
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest
+# 3. Re-run ingestion via Airflow DAG
+# Open Airflow UI at http://localhost:8080 and trigger the shopzada_ingestion DAG
+# Or use: docker exec shopzada-airflow-scheduler airflow dags trigger shopzada_ingestion
 ```
 
 ### Option 3: Using Airflow DAG
@@ -176,7 +177,7 @@ docker compose -f docker/docker-compose.yml run --rm shopzada-ingest
    ```
 3. Open Airflow UI at http://localhost:8080
 4. Find the `shopzada_ingestion` DAG and click "Trigger DAG"
-5. The DAG will re-ingest and export to Parquet
+5. The DAG will re-ingest all data into staging tables
 
 ### Verify Reset
 ```powershell

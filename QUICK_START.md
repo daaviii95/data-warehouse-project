@@ -11,18 +11,29 @@ docker compose -f docker/docker-compose.yml up -d shopzada-db
 
 ---
 
-### Step 2: Run Ingestion (Load Raw Data → Database)
+### Step 2: Start Airflow and Run Ingestion DAG
 
+**Start Airflow services:**
 ```powershell
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest
+docker compose -f docker/docker-compose.yml up -d shopzada-airflow-webserver shopzada-airflow-scheduler shopzada-db
 ```
 
-**What this does:**
+**Wait 30-60 seconds for Airflow to initialize**, then:
+
+1. Open Airflow UI: http://localhost:8080
+   - Username: `admin`
+   - Password: `admin`
+
+2. Find the `shopzada_ingestion` DAG and click the play button (▶️) to trigger it
+
+**What the DAG does:**
+- Validates data directory is mounted
 - Reads all files from `data/` folder (CSV, JSON, Excel, Parquet, Pickle, HTML)
 - Loads them into Postgres staging tables (`stg_*`)
 - Creates `ingestion_log` table to track what was loaded
+- Snapshot row counts for monitoring
 
-**Expected output:**
+**Expected output in Airflow logs:**
 - Should see "Processing..." messages for each file
 - Should see "Finished ingesting..." for each file
 - Should see "Processed X files from /data"
@@ -143,10 +154,9 @@ LIMIT 5;
 ```
 
 ### Problem: No staging tables
-**Solution:** Re-run ingestion:
-```powershell
-docker compose -f docker/docker-compose.yml run --rm shopzada-ingest
-```
+**Solution:** Re-run ingestion via Airflow:
+1. Open Airflow UI at http://localhost:8080
+2. Find the `shopzada_ingestion` DAG and click "Trigger DAG"
 
 ### Problem: Database connection error
 **Solution:** Make sure database is running:

@@ -1,8 +1,6 @@
+name: shopzada_dwh
+
 x-airflow-common: &airflow-common
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-    target: shopzada-airflow
   image: shopzada-airflow:latest
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -12,10 +10,12 @@ x-airflow-common: &airflow-common
     AIRFLOW_UID: 50000
     SHOPZADA_DATA_DIR: /opt/airflow/data
     SHOPZADA_REPO_ROOT: /opt/airflow/repo
+    DATA_DIR: /opt/airflow/data
     POSTGRES_HOST: shopzada-db
     POSTGRES_DB: shopzada
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: postgres
+    POSTGRES_PORT: 5432
   volumes:
     - ../airflow/dags:/opt/airflow/dags
     - ../airflow/logs:/opt/airflow/logs
@@ -40,27 +40,6 @@ services:
       interval: 5s
       retries: 10
 
-  shopzada-ingest:
-    container_name: shopzada-ingest
-    image: shopzada-ingest:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: shopzada-ingest
-    depends_on:
-      shopzada-db:
-        condition: service_healthy
-    environment:
-      POSTGRES_HOST: shopzada-db
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: shopzada
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      DATA_DIR: /data
-      CSV_CHUNK_SIZE: 20000
-    volumes:
-      - ../data:/data:ro
-
   shopzada-airflow-db:
     container_name: shopzada-airflow-db
     image: postgres:15
@@ -78,6 +57,10 @@ services:
   shopzada-airflow-init:
     <<: *airflow-common
     container_name: shopzada-airflow-init
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: shopzada-airflow
     depends_on:
       shopzada-airflow-db:
         condition: service_healthy
@@ -85,7 +68,8 @@ services:
     command: >
       -c "
       airflow db upgrade &&
-      airflow users create --username admin --password admin --firstname Shop --lastname Zada --role Admin --email admin@shopzada.local || true
+      airflow users create --username admin --password admin --firstname Shop --lastname Zada --role Admin --email admin@shopzada.local || true &&
+      python /opt/airflow/repo/scripts/setup_airflow_connection.py || true
       "
 
   shopzada-airflow-scheduler:

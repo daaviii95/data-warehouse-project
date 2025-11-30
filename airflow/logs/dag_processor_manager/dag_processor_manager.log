@@ -2215,3 +2215,175 @@ File Path                                        PID    Runtime      # DAGs    #
 /opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.16s           2025-11-22T01:43:57                      10
 /opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.15s           2025-11-22T01:43:58                      10
 ================================================================================
+[2025-11-27T13:13:14.216+0000] {manager.py:483} INFO - Processing files using up to 2 processes at a time 
+[2025-11-27T13:13:14.217+0000] {manager.py:484} INFO - Process each file at most once every 30 seconds
+[2025-11-27T13:13:14.219+0000] {manager.py:485} INFO - Checking for new files in /opt/airflow/dags every 300 seconds
+[2025-11-27T13:13:14.220+0000] {manager.py:821} INFO - Searching for files in /opt/airflow/dags
+[2025-11-27T13:13:14.478+0000] {manager.py:824} INFO - There are 8 files in /opt/airflow/dags
+[2025-11-27T13:13:14.649+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                          PID  Runtime      # DAGs    # Errors  Last Runtime    Last Run      Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  ----------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py    173  0.06s             0           0                                                   0
+/opt/airflow/dags/shopzada_business_dept.py                               0           0                                                   0
+/opt/airflow/dags/shopzada_customer_dept.py                               0           0                                                   0
+/opt/airflow/dags/shopzada_enterprise_dept.py                             0           0                                                   0
+/opt/airflow/dags/shopzada_etl_pipeline.py                                0           0                                                   0
+/opt/airflow/dags/shopzada_ingest.py               176  0.03s             0           0                                                   0
+/opt/airflow/dags/shopzada_marketing_dept.py                              0           0                                                   0
+/opt/airflow/dags/shopzada_operations_dept.py                             0           0                                                   0
+================================================================================
+[2025-11-27T13:13:46.944+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.16s           2025-11-27T13:13:45                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.15s           2025-11-27T13:13:45                      12
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.14s           2025-11-27T13:13:45                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.14s           2025-11-27T13:13:46                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.13s           2025-11-27T13:13:46                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.13s           2025-11-27T13:13:45                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.12s           2025-11-27T13:13:45                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.12s           2025-11-27T13:13:45                      10
+================================================================================
+[2025-11-27T13:14:18.594+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.22s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.22s           2025-11-27T13:14:16                      12
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.16s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.14s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.14s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.14s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.14s           2025-11-27T13:14:16                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.13s           2025-11-27T13:14:16                      10
+================================================================================
+[2025-11-27T13:14:50.710+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.31s           2025-11-27T13:14:46                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.29s           2025-11-27T13:14:46                      12
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.17s           2025-11-27T13:14:47                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.14s           2025-11-27T13:14:47                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.14s           2025-11-27T13:14:47                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.14s           2025-11-27T13:14:47                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.14s           2025-11-27T13:14:47                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.13s           2025-11-27T13:14:47                      10
+================================================================================
+[2025-11-27T13:15:22.422+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.18s           2025-11-27T13:15:17                      12
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.18s           2025-11-27T13:15:17                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.15s           2025-11-27T13:15:18                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.15s           2025-11-27T13:15:18                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.14s           2025-11-27T13:15:17                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.14s           2025-11-27T13:15:18                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.14s           2025-11-27T13:15:18                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.14s           2025-11-27T13:15:18                      10
+================================================================================
+[2025-11-27T13:15:54.198+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.22s           2025-11-27T13:15:48                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.21s           2025-11-27T13:15:48                      12
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.18s           2025-11-27T13:15:48                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.17s           2025-11-27T13:15:48                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.15s           2025-11-27T13:15:49                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.15s           2025-11-27T13:15:48                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.15s           2025-11-27T13:15:49                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.13s           2025-11-27T13:15:49                      10
+================================================================================
+[2025-11-27T13:16:26.415+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.41s           2025-11-27T13:16:19                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.35s           2025-11-27T13:16:19                      12
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.31s           2025-11-27T13:16:20                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.28s           2025-11-27T13:16:20                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.17s           2025-11-27T13:16:19                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.16s           2025-11-27T13:16:20                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.15s           2025-11-27T13:16:20                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.13s           2025-11-27T13:16:20                      10
+================================================================================
+[2025-11-27T13:16:58.994+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.23s           2025-11-27T13:16:50                      12
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.22s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.17s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.17s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.16s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.15s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.14s           2025-11-27T13:16:50                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.14s           2025-11-27T13:16:50                      10
+================================================================================
+[2025-11-27T13:17:30.711+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.24s           2025-11-27T13:17:21                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.21s           2025-11-27T13:17:21                      10
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.17s           2025-11-27T13:17:20                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.17s           2025-11-27T13:17:20                      12
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.16s           2025-11-27T13:17:21                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.15s           2025-11-27T13:17:21                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.14s           2025-11-27T13:17:21                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.13s           2025-11-27T13:17:21                      10
+================================================================================
+[2025-11-27T13:18:02.652+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.27s           2025-11-27T13:17:51                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.26s           2025-11-27T13:17:51                      12
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.17s           2025-11-27T13:17:52                      10
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.17s           2025-11-27T13:17:52                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.14s           2025-11-27T13:17:52                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.14s           2025-11-27T13:17:52                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.13s           2025-11-27T13:17:52                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.12s           2025-11-27T13:17:52                      10
+================================================================================
+[2025-11-27T13:18:14.931+0000] {manager.py:821} INFO - Searching for files in /opt/airflow/dags
+[2025-11-27T13:18:15.066+0000] {manager.py:824} INFO - There are 8 files in /opt/airflow/dags
+[2025-11-27T13:18:34.624+0000] {manager.py:997} INFO - 
+================================================================================
+DAG File Processing Stats
+
+File Path                                        PID    Runtime      # DAGs    # Errors  Last Runtime    Last Run               Last # of DB Queries
+-----------------------------------------------  -----  ---------  --------  ----------  --------------  -------------------  ----------------------
+/opt/airflow/dags/shopzada_all_depts_parquet.py                           1           0  0.23s           2025-11-27T13:18:22                      10
+/opt/airflow/dags/shopzada_ingest.py                                      1           0  0.21s           2025-11-27T13:18:22                      12
+/opt/airflow/dags/shopzada_etl_pipeline.py                                1           0  0.15s           2025-11-27T13:18:23                      10
+/opt/airflow/dags/shopzada_enterprise_dept.py                             1           0  0.15s           2025-11-27T13:18:23                      10
+/opt/airflow/dags/shopzada_business_dept.py                               1           0  0.15s           2025-11-27T13:18:23                      10
+/opt/airflow/dags/shopzada_customer_dept.py                               1           0  0.15s           2025-11-27T13:18:23                      10
+/opt/airflow/dags/shopzada_operations_dept.py                             1           0  0.13s           2025-11-27T13:18:23                      10
+/opt/airflow/dags/shopzada_marketing_dept.py                              1           0  0.12s           2025-11-27T13:18:23                      10
+================================================================================
