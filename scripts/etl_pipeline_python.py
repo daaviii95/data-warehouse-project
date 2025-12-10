@@ -276,19 +276,14 @@ def clean_dataframe(df, file_type=''):
     return df
 
 def extract_numeric(value):
-    """Extract numeric value from string (e.g., '3days' -> 3, '8days' -> 8, '6px' -> 6, '4pcs' -> 4)"""
+    """Extract numeric value from string (e.g., '3days' -> 3, '8days' -> 8)"""
     if pd.isna(value):
         return None
     if isinstance(value, (int, float)):
         return int(value)
     # Convert to string and extract first number
     str_value = str(value).strip()
-    # Normalize common typos: "px" is likely a typo for "pcs" or "pieces"
-    # But we just extract the number, so this is just for logging
-    if 'px' in str_value.lower() and 'pixel' not in str_value.lower():
-        # Likely typo, but we'll extract the number anyway
-        pass
-    # Try to find numeric part (handles "3days", "8 days", "15days", "6px", "4pcs", "5pieces", "7PC", etc.)
+    # Try to find numeric part (handles "3days", "8 days", "15days", etc.)
     match = re.search(r'\d+', str_value)
     if match:
         return int(match.group())
@@ -318,18 +313,16 @@ def parse_discount(value):
         return float(value)
     # Extract numeric value from string
     str_value = str(value).strip().lower()
-    # Handle double percent sign (10%% -> 10%)
-    str_value = str_value.replace('%%', '%')
-    # Remove common suffixes (%, pct, percent) - handle multiple occurrences
+    # Remove common suffixes
     str_value = re.sub(r'[%pctpercent]+', '', str_value)
-    # Extract number (handles decimals like 1.5%)
+    # Extract number
     match = re.search(r'\d+\.?\d*', str_value)
     if match:
         return float(match.group())
     return None
 
 def format_product_type(value):
-    """Format product type for cleaner display and fix common typos"""
+    """Format product type for cleaner display"""
     if pd.isna(value) or value is None:
         return None
     str_value = str(value).strip()
@@ -343,30 +336,7 @@ def format_product_type(value):
             formatted.append(word)
         else:
             formatted.append(word.title())
-    result = ' '.join(formatted)
-    
-    # Fix common typos and normalize variations
-    typo_fixes = {
-        'Toolss': 'Tools',  # Fix double 's' typo
-        'Toolss ': 'Tools',
-        ' Toolss': 'Tools',
-    }
-    for typo, correct in typo_fixes.items():
-        if typo in result:
-            result = result.replace(typo, correct)
-    
-    # Normalize common variations (case-insensitive)
-    result_lower = result.lower()
-    normalization_map = {
-        'toolss': 'Tools',
-        'cosmetic': 'Cosmetics',  # Normalize singular to plural
-    }
-    for variant, normalized in normalization_map.items():
-        if result_lower == variant or result_lower == variant + 's':
-            result = normalized
-            break
-    
-    return result
+    return ' '.join(formatted)
 
 def format_name(value):
     """Format person names - title case, remove extra spaces"""
@@ -1049,95 +1019,104 @@ def load_fact_orders():
                 delay_list.append(df)
         if delay_list:
             delays = pd.concat(delay_list, ignore_index=True)
-    # Merge with delays
-        order_data = order_data.merge(
-            delays,
-            on='order_id',
-            how='left'
-        )
-        logging.info(f"After delays merge, columns: {list(order_data.columns)}")
+            # Merge with delays
+            order_data = order_data.merge(
+                delays,
+                on='order_id',
+                how='left'
+            )
+            logging.info(f"After delays merge, columns: {list(order_data.columns)}")
     
-    # Get dimension keys and insert
-    # First, get date dimension mapping (read-only, so use connect)
+    # Pre-load all dimension mappings (much faster than per-row queries)
+    logging.info("Pre-loading dimension mappings...")
     with engine.connect() as conn:
+        # Date dimension mapping
         date_map = {}
         result = conn.execute(text("SELECT date_sk, date FROM dim_date"))
         for row in result:
             date_map[str(row[1])] = row[0]
         
-    # Now insert data (use begin for transaction)
-    with engine.begin() as conn:
-        inserted = 0
-        for _, row in order_data.iterrows():
-            try:
-                # Get dimension keys
-                user_result = conn.execute(text("SELECT user_sk FROM dim_user WHERE user_id = :user_id"), 
-                                         {'user_id': str(row.get('user_id'))})
-                user_sk = user_result.fetchone()
-                if not user_sk:
-                    continue
-                user_sk = user_sk[0]
-                
-                merchant_result = conn.execute(text("SELECT merchant_sk FROM dim_merchant WHERE merchant_id = :merchant_id"),
-                                             {'merchant_id': str(row.get('merchant_id'))})
-                merchant_sk = merchant_result.fetchone()
-                if not merchant_sk:
-                    continue
-                merchant_sk = merchant_sk[0]
-                
-                staff_result = conn.execute(text("SELECT staff_sk FROM dim_staff WHERE staff_id = :staff_id"),
-                                          {'staff_id': str(row.get('staff_id'))})
-                staff_sk = staff_result.fetchone()
-                if not staff_sk:
-                    continue
-                staff_sk = staff_sk[0]
-                
-                # Get date_sk
-                transaction_date = pd.to_datetime(row.get('transaction_date'), errors='coerce')
-                if pd.isna(transaction_date):
-                    continue
-                date_str = transaction_date.strftime('%Y-%m-%d')
-                date_sk = date_map.get(date_str)
-                if not date_sk:
-                    continue
-                
-                # Get estimated_arrival_days - try multiple column name variations
-                # After clean_dataframe, spaces become underscores
-                estimated_arrival = get_column_value(row, ['estimated_arrival', 'estimated arrival', 'estimated_arrival_days'])
-                estimated_arrival_days = extract_numeric(estimated_arrival)
-                
-                # Get delay_days - try multiple column name variations
-                delay_days_val = get_column_value(row, ['delay_days', 'delay in days', 'delay_in_days'])
-                if delay_days_val is not None:
-                    delay_days = extract_numeric(delay_days_val)
-                    # If extract_numeric returns None or invalid, set to None
-                    if delay_days is None or delay_days < 0:
-                        delay_days = None
-                else:
-                    delay_days = None  # Use NULL instead of -1
-                
-                # Insert
-                conn.execute(text("""
-                    INSERT INTO fact_orders (order_id, user_sk, merchant_sk, staff_sk, transaction_date_sk, estimated_arrival_days, delay_days)
-                    VALUES (:order_id, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :estimated_arrival_days, :delay_days)
-                    ON CONFLICT (order_id) DO UPDATE SET
-                        estimated_arrival_days = EXCLUDED.estimated_arrival_days,
-                        delay_days = EXCLUDED.delay_days
-                """), {
-                    'order_id': str(row.get('order_id')),
-                    'user_sk': user_sk,
-                    'merchant_sk': merchant_sk,
-                    'staff_sk': staff_sk,
-                    'transaction_date_sk': date_sk,
-                    'estimated_arrival_days': estimated_arrival_days,
-                    'delay_days': delay_days
-                })
-                inserted += 1
-            except Exception as e:
-                logging.warning(f"Error inserting order {row.get('order_id')}: {e}")
-                continue
+        # User dimension mapping
+        user_map = {}
+        result = conn.execute(text("SELECT user_sk, user_id FROM dim_user"))
+        for row in result:
+            user_map[str(row[1])] = row[0]
+        
+        # Merchant dimension mapping
+        merchant_map = {}
+        result = conn.execute(text("SELECT merchant_sk, merchant_id FROM dim_merchant"))
+        for row in result:
+            merchant_map[str(row[1])] = row[0]
+        
+        # Staff dimension mapping
+        staff_map = {}
+        result = conn.execute(text("SELECT staff_sk, staff_id FROM dim_staff"))
+        for row in result:
+            staff_map[str(row[1])] = row[0]
     
-    logging.info(f"Loaded {inserted} orders into fact_orders")
+    logging.info(f"Loaded mappings: {len(date_map)} dates, {len(user_map)} users, {len(merchant_map)} merchants, {len(staff_map)} staff")
+    
+    # Prepare data for bulk insert
+    logging.info("Preparing fact_orders data for bulk insert...")
+    fact_rows = []
+    
+    for _, row in order_data.iterrows():
+        try:
+            # Get dimension keys from pre-loaded maps
+            user_id = str(row.get('user_id'))
+            merchant_id = str(row.get('merchant_id'))
+            staff_id = str(row.get('staff_id'))
+            
+            user_sk = user_map.get(user_id)
+            merchant_sk = merchant_map.get(merchant_id)
+            staff_sk = staff_map.get(staff_id)
+            
+            if not user_sk or not merchant_sk or not staff_sk:
+                continue
+            
+            # Get date_sk
+            transaction_date = pd.to_datetime(row.get('transaction_date'), errors='coerce')
+            if pd.isna(transaction_date):
+                continue
+            date_str = transaction_date.strftime('%Y-%m-%d')
+            date_sk = date_map.get(date_str)
+            if not date_sk:
+                continue
+            
+            # Get estimated_arrival_days - try multiple column name variations
+            estimated_arrival = get_column_value(row, ['estimated_arrival', 'estimated arrival', 'estimated_arrival_days'])
+            estimated_arrival_days = extract_numeric(estimated_arrival)
+            
+            # Get delay_days - try multiple column name variations
+            delay_days_val = get_column_value(row, ['delay_days', 'delay in days', 'delay_in_days'])
+            delay_days = extract_numeric(delay_days_val) if delay_days_val is not None else -1
+            
+            fact_rows.append({
+                'order_id': str(row.get('order_id')),
+                'user_sk': user_sk,
+                'merchant_sk': merchant_sk,
+                'staff_sk': staff_sk,
+                'transaction_date_sk': date_sk,
+                'estimated_arrival_days': estimated_arrival_days,
+                'delay_days': delay_days
+            })
+        except Exception as e:
+            logging.warning(f"Error preparing order {row.get('order_id')}: {e}")
+            continue
+    
+    # Bulk insert using executemany (much faster than row-by-row)
+    if fact_rows:
+        logging.info(f"Bulk inserting {len(fact_rows)} orders...")
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO fact_orders (order_id, user_sk, merchant_sk, staff_sk, transaction_date_sk, estimated_arrival_days, delay_days)
+                VALUES (:order_id, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :estimated_arrival_days, :delay_days)
+                ON CONFLICT (order_id) DO UPDATE SET
+                    estimated_arrival_days = EXCLUDED.estimated_arrival_days,
+                    delay_days = EXCLUDED.delay_days
+            """), fact_rows)
+    
+    logging.info(f"Loaded {len(fact_rows)} orders into fact_orders")
 
 def load_fact_line_items():
     """Load fact_line_items - combines prices and products by row position"""
@@ -1199,52 +1178,71 @@ def load_fact_line_items():
     if 'order_id_price' in combined.columns:
         combined = combined.drop(columns=['order_id_price'])
     
-    # Get fact_orders to get dimension keys
-    with engine.begin() as conn:
-        inserted = 0
-        for _, row in combined.iterrows():
-            try:
-                # Get product_sk
-                product_result = conn.execute(text("SELECT product_sk FROM dim_product WHERE product_id = :product_id"),
-                                            {'product_id': str(row.get('product_id'))})
-                product_sk = product_result.fetchone()
-                if not product_sk:
-                    continue
-                product_sk = product_sk[0]
-                
-                # Get keys from fact_orders
-                order_result = conn.execute(text("""
-                    SELECT user_sk, merchant_sk, staff_sk, transaction_date_sk 
-                    FROM fact_orders 
-                    WHERE order_id = :order_id
-                """), {'order_id': str(row.get('order_id'))})
-                order_row = order_result.fetchone()
-                if not order_row:
-                    continue
-                
-                user_sk, merchant_sk, staff_sk, transaction_date_sk = order_row
-                
-                # Insert
-                conn.execute(text("""
-                    INSERT INTO fact_line_items (order_id, product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk, price, quantity)
-                    VALUES (:order_id, :product_sk, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :price, :quantity)
-                    ON CONFLICT (order_id, product_sk) DO NOTHING
-                """), {
-                    'order_id': str(row.get('order_id')),
-                    'product_sk': product_sk,
-                    'user_sk': user_sk,
-                    'merchant_sk': merchant_sk,
-                    'staff_sk': staff_sk,
-                    'transaction_date_sk': transaction_date_sk,
-                    'price': float(row.get('price', 0)) if pd.notna(row.get('price')) else None,
-                    'quantity': extract_numeric(row.get('quantity')) or 0
-                })
-                inserted += 1
-            except Exception as e:
-                logging.warning(f"Error inserting line item {row.get('order_id')}: {e}")
-                continue
+    # Pre-load dimension mappings
+    logging.info("Pre-loading dimension mappings for fact_line_items...")
+    with engine.connect() as conn:
+        # Product dimension mapping
+        product_map = {}
+        result = conn.execute(text("SELECT product_sk, product_id FROM dim_product"))
+        for row in result:
+            product_map[str(row[1])] = row[0]
+        
+        # Fact_orders mapping (order_id -> dimension keys)
+        order_map = {}
+        result = conn.execute(text("SELECT order_id, user_sk, merchant_sk, staff_sk, transaction_date_sk FROM fact_orders"))
+        for row in result:
+            order_map[str(row[0])] = {
+                'user_sk': row[1],
+                'merchant_sk': row[2],
+                'staff_sk': row[3],
+                'transaction_date_sk': row[4]
+            }
     
-    logging.info(f"Loaded {inserted} line items into fact_line_items")
+    logging.info(f"Loaded mappings: {len(product_map)} products, {len(order_map)} orders")
+    
+    # Prepare data for bulk insert
+    logging.info("Preparing fact_line_items data for bulk insert...")
+    fact_rows = []
+    
+    for _, row in combined.iterrows():
+        try:
+            # Get product_sk from pre-loaded map
+            product_id = str(row.get('product_id'))
+            product_sk = product_map.get(product_id)
+            if not product_sk:
+                continue
+            
+            # Get keys from fact_orders
+            order_id = str(row.get('order_id'))
+            order_keys = order_map.get(order_id)
+            if not order_keys:
+                continue
+            
+            fact_rows.append({
+                'order_id': order_id,
+                'product_sk': product_sk,
+                'user_sk': order_keys['user_sk'],
+                'merchant_sk': order_keys['merchant_sk'],
+                'staff_sk': order_keys['staff_sk'],
+                'transaction_date_sk': order_keys['transaction_date_sk'],
+                'price': float(row.get('price', 0)) if pd.notna(row.get('price')) else None,
+                'quantity': extract_numeric(row.get('quantity')) or 0
+            })
+        except Exception as e:
+            logging.warning(f"Error preparing line item {row.get('order_id')}: {e}")
+            continue
+    
+    # Bulk insert
+    if fact_rows:
+        logging.info(f"Bulk inserting {len(fact_rows)} line items...")
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO fact_line_items (order_id, product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk, price, quantity)
+                VALUES (:order_id, :product_sk, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :price, :quantity)
+                ON CONFLICT (order_id, product_sk) DO NOTHING
+            """), fact_rows)
+    
+    logging.info(f"Loaded {len(fact_rows)} line items into fact_line_items")
 
 def load_fact_campaign_transactions():
     """Load fact_campaign_transactions"""
@@ -1271,58 +1269,77 @@ def load_fact_campaign_transactions():
     combined['campaign_id'] = combined['campaign_id'].fillna('CAMPAIGN00000')
     combined['availed'] = combined['availed'].fillna('Not Applicable')
     
-    with engine.begin() as conn:
-        inserted = 0
-        for _, row in combined.iterrows():
-            try:
-                # Get campaign_sk
-                campaign_result = conn.execute(text("SELECT campaign_sk FROM dim_campaign WHERE campaign_id = :campaign_id"),
-                                              {'campaign_id': str(row.get('campaign_id'))})
-                campaign_sk = campaign_result.fetchone()
-                if not campaign_sk:
-                    continue
-                campaign_sk = campaign_sk[0]
-                
-                # Get keys from fact_orders
-                order_result = conn.execute(text("""
-                    SELECT user_sk, merchant_sk, transaction_date_sk 
-                    FROM fact_orders 
-                    WHERE order_id = :order_id
-                """), {'order_id': str(row.get('order_id'))})
-                order_row = order_result.fetchone()
-                if not order_row:
-                    continue
-                
-                user_sk, merchant_sk, transaction_date_sk = order_row
-                
-                # Convert availed
-                availed_val = row.get('availed')
-                if pd.isna(availed_val) or availed_val == 'Not Applicable':
-                    availed = None
-                elif str(availed_val).lower() in ('1', 'true'):
-                    availed = 1
-                else:
-                    availed = 0
-                
-                # Insert
-                conn.execute(text("""
-                    INSERT INTO fact_campaign_transactions (order_id, campaign_sk, user_sk, merchant_sk, transaction_date_sk, availed)
-                    VALUES (:order_id, :campaign_sk, :user_sk, :merchant_sk, :transaction_date_sk, :availed)
-                    ON CONFLICT (campaign_sk, user_sk, merchant_sk, transaction_date_sk) DO NOTHING
-                """), {
-                    'order_id': str(row.get('order_id')),
-                    'campaign_sk': campaign_sk,
-                    'user_sk': user_sk,
-                    'merchant_sk': merchant_sk,
-                    'transaction_date_sk': transaction_date_sk,
-                    'availed': availed
-                })
-                inserted += 1
-            except Exception as e:
-                logging.warning(f"Error inserting campaign transaction {row.get('order_id')}: {e}")
-                continue
+    # Pre-load dimension mappings
+    logging.info("Pre-loading dimension mappings for fact_campaign_transactions...")
+    with engine.connect() as conn:
+        # Campaign dimension mapping
+        campaign_map = {}
+        result = conn.execute(text("SELECT campaign_sk, campaign_id FROM dim_campaign"))
+        for row in result:
+            campaign_map[str(row[1])] = row[0]
+        
+        # Fact_orders mapping (order_id -> dimension keys)
+        order_map = {}
+        result = conn.execute(text("SELECT order_id, user_sk, merchant_sk, transaction_date_sk FROM fact_orders"))
+        for row in result:
+            order_map[str(row[0])] = {
+                'user_sk': row[1],
+                'merchant_sk': row[2],
+                'transaction_date_sk': row[3]
+            }
     
-    logging.info(f"Loaded {inserted} campaign transactions into fact_campaign_transactions")
+    logging.info(f"Loaded mappings: {len(campaign_map)} campaigns, {len(order_map)} orders")
+    
+    # Prepare data for bulk insert
+    logging.info("Preparing fact_campaign_transactions data for bulk insert...")
+    fact_rows = []
+    
+    for _, row in combined.iterrows():
+        try:
+            # Get campaign_sk from pre-loaded map
+            campaign_id = str(row.get('campaign_id'))
+            campaign_sk = campaign_map.get(campaign_id)
+            if not campaign_sk:
+                continue
+            
+            # Get keys from fact_orders
+            order_id = str(row.get('order_id'))
+            order_keys = order_map.get(order_id)
+            if not order_keys:
+                continue
+            
+            # Convert availed
+            availed_val = row.get('availed')
+            if pd.isna(availed_val) or availed_val == 'Not Applicable':
+                availed = None
+            elif str(availed_val).lower() in ('1', 'true'):
+                availed = 1
+            else:
+                availed = 0
+            
+            fact_rows.append({
+                'order_id': order_id,
+                'campaign_sk': campaign_sk,
+                'user_sk': order_keys['user_sk'],
+                'merchant_sk': order_keys['merchant_sk'],
+                'transaction_date_sk': order_keys['transaction_date_sk'],
+                'availed': availed
+            })
+        except Exception as e:
+            logging.warning(f"Error preparing campaign transaction {row.get('order_id')}: {e}")
+            continue
+    
+    # Bulk insert
+    if fact_rows:
+        logging.info(f"Bulk inserting {len(fact_rows)} campaign transactions...")
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO fact_campaign_transactions (order_id, campaign_sk, user_sk, merchant_sk, transaction_date_sk, availed)
+                VALUES (:order_id, :campaign_sk, :user_sk, :merchant_sk, :transaction_date_sk, :availed)
+                ON CONFLICT (campaign_sk, user_sk, merchant_sk, transaction_date_sk) DO NOTHING
+            """), fact_rows)
+    
+    logging.info(f"Loaded {len(fact_rows)} campaign transactions into fact_campaign_transactions")
 
 def main():
     """Main ETL pipeline - similar to original Python scripts"""
