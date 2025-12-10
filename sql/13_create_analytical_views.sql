@@ -120,7 +120,38 @@ GROUP BY
 ORDER BY total_revenue DESC;
 
 -- ============================================================================
--- VIEW 4: Sales by Time Period
+-- VIEW 4: Revenue by Segment and Time (for trend analysis)
+-- ============================================================================
+-- Combines customer segment and time dimensions for trend analysis
+CREATE OR REPLACE VIEW vw_segment_revenue_by_time AS
+SELECT 
+    dd.date,
+    dd.year,
+    dd.month,
+    dd.month_name,
+    dd.quarter,
+    du.user_type AS customer_segment,
+    COUNT(DISTINCT fo.order_id) AS total_orders,
+    COUNT(DISTINCT fo.user_sk) AS unique_customers,
+    SUM(fli.quantity) AS total_items_sold,
+    SUM(fli.quantity * dp.price) AS total_revenue,
+    AVG(fli.quantity * dp.price) AS avg_order_value
+FROM fact_orders fo
+LEFT JOIN dim_date dd ON fo.transaction_date_sk = dd.date_sk
+LEFT JOIN dim_user du ON fo.user_sk = du.user_sk
+LEFT JOIN fact_line_items fli ON fo.order_id = fli.order_id
+LEFT JOIN dim_product dp ON fli.product_sk = dp.product_sk
+GROUP BY 
+    dd.date,
+    dd.year,
+    dd.month,
+    dd.month_name,
+    dd.quarter,
+    du.user_type
+ORDER BY dd.date, du.user_type;
+
+-- ============================================================================
+-- VIEW 5: Sales by Time Period
 -- ============================================================================
 -- Additional analytical view for time-based analysis
 CREATE OR REPLACE VIEW vw_sales_by_time AS
