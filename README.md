@@ -1,216 +1,305 @@
-ShopZada is a rapidly growing e-commerce platform that has expanded globally, now 
-handling over half a million orders and two million line items from diverse product 
-categories. Despite this growth, their data remains fragmented across multiple departments:
-Business, Customer Management, Enterprise, Marketing, and Operations.
+# ShopZada Data Warehouse Solution
 
-**Groupname**, was tasked to design, implement, and operationalize a complete Data Warehouse 
-solution that integrates these datasets, delivers analytical insights, and supports data-driven decision-making.
+A complete end-to-end Data Warehouse solution implementing the Kimball methodology with Apache Airflow orchestration.
 
-Chosen Data Warehouse Methodology: **Kimball Dimensional Modeling (Star Schema)**
+## 🏗️ Architecture
 
-## Architecture Overview
+- **Methodology**: Kimball Star Schema
+- **Orchestration**: Apache Airflow 2.10.2
+- **Database**: PostgreSQL 15
+- **Data Processing**: Python 3.11, Pandas, PyArrow
+- **Containerization**: Docker & Docker Compose
+
+## 📁 Project Structure
 
 ```
-Source Data → Staging Layer → Dimensional Model → Presentation Layer
+DWHFinalTest/
+├── infra/                       # Infrastructure as Code
+│   ├── Dockerfile              # Airflow container definition
+│   └── docker-compose.yml      # Multi-container orchestration
+├── scripts/                     # Python ETL scripts
+│   ├── etl_pipeline_python.py  # Main Python ETL pipeline
+│   └── data_quality.py         # Data quality validation
+├── sql/                         # SQL transformation scripts
+│   ├── 01_create_schema_from_physical_model.sql
+│   ├── 02_populate_dim_date.sql
+│   ├── 03_load_dim_campaign.sql
+│   ├── 04_load_dim_product.sql
+│   ├── 05_load_dim_user.sql
+│   ├── 06_load_dim_staff.sql
+│   ├── 07_load_dim_merchant.sql
+│   ├── 08_load_dim_user_job.sql
+│   ├── 09_load_dim_credit_card.sql
+│   ├── 10_load_fact_orders.sql
+│   ├── 11_load_fact_line_items.sql
+│   ├── 12_load_fact_campaign_transactions.sql
+│   └── 13_create_analytical_views.sql
+├── workflows/                   # Airflow DAG definitions
+│   ├── shopzada_etl_pipeline.py
+│   └── shopzada_data_quality_dag.py
+├── docs/                        # Technical documentation
+│   ├── ARCHITECTURE.md
+│   ├── DATA_MODEL.md
+│   ├── WORKFLOW.md
+│   ├── BUSINESS_QUESTIONS.md
+│   └── SCRIPTS_USAGE.md
+├── dashboard/                   # Dashboard documentation and guides
+│   ├── DASHBOARD_DESIGN_GUIDE.md
+│   ├── DASHBOARD_QUICK_START.md
+│   └── POWER_BI_SETUP_GUIDE.md
+├── data/                        # Source data files (not in repo)
+│   ├── Business Department/
+│   ├── Customer Management Department/
+│   ├── Enterprise Department/
+│   ├── Marketing Department/
+│   └── Operations Department/
+├── airflow/                     # Airflow runtime files (logs, plugins)
+│   ├── logs/
+│   └── plugins/
+├── physicalmodel.txt           # Physical data model
+├── requirements.txt            # Python dependencies
+└── README.md                   # This file
 ```
 
-- **Staging Layer**: Raw data ingestion into `stg_*` tables + Parquet exports
-- **Dimensional Model**: Kimball star schema with fact and dimension tables
-- **Presentation Layer**: Business Intelligence views for analytics
+## 🚀 Quick Start
 
+### Prerequisites
 
-## Quick Verification
+- Docker Desktop (or Docker Engine + Docker Compose)
+- At least 4GB RAM available
+- Ports 5432 and 8080 available
 
-**Run the verification script to check if everything is working:**
-```powershell
-# PowerShell
-.\scripts\verify_setup.ps1
+### Installation
 
-# Bash/Linux
-chmod +x scripts/verify_setup.sh
-./scripts/verify_setup.sh
-```
+1. **Clone/Navigate to the project directory**
+   ```bash
+   cd DWHFinalTest
+   ```
 
-This checks:
-- ✅ Docker services are running
-- ✅ Database connection
-- ✅ Staging tables exist
-- ✅ Ingestion logs
-- ✅ Dimensional model (if ETL has run)
-- ✅ Airflow accessibility
+2. **Start the Docker containers**
+   ```bash
+   cd infra
+   docker compose up -d
+   ```
 
-## Dockerized Staging Layer
+3. **Wait for services to initialize** (2-3 minutes)
+   - Airflow database migration
+   - Airflow user creation (admin/admin)
+   - PostgreSQL database setup
+   - Airflow connection to ShopZada database automatically created
 
-- **Ingestion is now orchestrated via Airflow DAGs** (see Airflow Orchestration section below)
-- Custom images:
-  - `shopzada-db:latest` – Postgres 15 with the `shopzada` warehouse database.
-  - `shopzada-airflow:latest` – Airflow container with ShopZada dependencies installed.
-- Data sources must live in `./data`; the compose file mounts it read-only into Airflow containers.
+4. **Access Airflow Web UI**
+   - URL: http://localhost:8080
+   - Username: `admin`
+   - Password: `admin`
 
-## Airflow Orchestration
+5. **Trigger the ETL Pipeline**
+   - In Airflow UI, find the `shopzada_etl_pipeline` DAG
+   - Toggle the DAG ON (if it's paused)
+   - Click the play button (▶) to trigger the DAG manually
+   - Monitor progress in the Graph View or Tree View
 
-- **All ingestion is now done via Airflow DAGs** (no standalone ingestion service)
-- DAGs live in `airflow/dags`. Start the full stack (Postgres + Airflow scheduler/webserver) and open the UI on http://localhost:8080:
-  ```powershell
-  docker compose -f docker/docker-compose.yml up --build shopzada-airflow-webserver shopzada-airflow-scheduler shopzada-db
-  ```
-  The first run will also start `shopzada-airflow-init` to apply migrations and provision the default admin user (`admin` / `admin`).
+### Verify Setup
 
-### Main Ingestion DAG (`shopzada_ingestion`)
-- **Purpose**: Raw data ingestion to database
-- **Workflow**: **Raw → Ingest → Database**
-- **How to run**: Trigger the DAG in Airflow UI (http://localhost:8080) or wait for scheduled execution (@daily)
-  1. **Validate**: Checks data directory is mounted
-  2. **Ingestion**: Directly imports and calls `scripts/ingest.py` to load all source files into Postgres staging tables (`stg_*`)
-  3. **Snapshot**: Records row counts for monitoring and validation
+1. **Check Airflow Connection**
+   - Go to Admin → Connections
+   - Verify `shopzada_postgres` connection exists
 
-### Optional: Department-Specific Parquet Export DAGs
-If you need Parquet exports (e.g., for analytics tools), separate DAGs are available:
+2. **Check Database Tables**
+   ```bash
+   docker exec -it shopzada-db psql -U postgres -d shopzada
+   ```
+   Then run:
+   ```sql
+   \dt                    -- List all tables
+   \dv                    -- List all views
+   SELECT COUNT(*) FROM dim_user;
+   SELECT COUNT(*) FROM fact_orders;
+   ```
 
-- **`shopzada_business_dept_parquet`** - Business Department
-- **`shopzada_customer_dept_parquet`** - Customer Management Department
-- **`shopzada_enterprise_dept_parquet`** - Enterprise Department
-- **`shopzada_marketing_dept_parquet`** - Marketing Department
-- **`shopzada_operations_dept_parquet`** - Operations Department
-- **`shopzada_all_depts_parquet`** - All departments in parallel
+## 📊 Data Warehouse Schema
 
-**Note**: These are optional and separate from the main ingestion pipeline. The main flow is **Raw → Ingest → Database**.
+### Dimension Tables
+- `dim_date` - Time dimension (2020-2025)
+- `dim_campaign` - Marketing campaigns
+- `dim_product` - Product catalog
+- `dim_user` - Customer information
+- `dim_staff` - Staff/employee data
+- `dim_merchant` - Merchant/vendor information
+- `dim_user_job` - User job information (outrigger)
+- `dim_credit_card` - Credit card information (outrigger)
 
-- All staging data is stored in Postgres `stg_*` tables for downstream Kimball dimensional modeling.
+### Fact Tables
+- `fact_orders` - Order transactions
+- `fact_line_items` - Order line items with product details
+- `fact_campaign_transactions` - Campaign usage tracking
 
-## Kimball Dimensional Model (ETL Pipeline)
+### Analytical Views
+- `vw_campaign_performance` - Campaign effectiveness metrics
+- `vw_merchant_performance` - Merchant performance analysis
+- `vw_customer_segment_revenue` - Customer segment revenue analysis
+- `vw_sales_by_time` - Time-based sales trends
+- `vw_product_performance` - Product performance metrics
+- `vw_staff_performance` - Staff productivity metrics
 
-### Schema Creation
-The Kimball star schema includes:
-- **Dimension Tables**: `dim_date`, `dim_product`, `dim_customer`, `dim_merchant`, `dim_staff`, `dim_campaign`
-- **Fact Tables**: `fact_sales` (grain: line item), `fact_campaign_performance`
-- **Presentation Views**: Pre-aggregated BI views for reporting
+## 🔄 ETL Pipeline
 
-### Running ETL Pipeline
+The ETL pipeline consists of 4 main stages:
 
-**Using Airflow:**
-1. Trigger `shopzada_etl_pipeline` DAG in Airflow UI
-2. Pipeline executes: Schema → Date Dimension → Dimensions → Facts → Validation
+1. **Schema Creation** → Create all dimension and fact table structures
+2. **Date Dimension** → Populate time dimension (2020-2025)
+3. **Python ETL** → Direct file reading, transformation, and loading into dimensional model
+   - Loads dimensions: campaign, product, user, staff, merchant, user_job, credit_card
+   - Loads facts: orders, line_items, campaign_transactions
+4. **Data Quality** → Validate data integrity (referential integrity, nulls, duplicates, etc.)
 
-**Manual Execution:**
-```powershell
-# 1. Create schema
-Get-Content sql/kimball_schema.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
+## 📈 Business Questions Addressed
 
-# 2. Populate date dimension
-Get-Content sql/populate_dim_date.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
+1. **What kinds of campaigns drive the highest order volume?**
+   - View: `vw_campaign_performance`
+   - Metrics: Order volume, revenue, availed rate
 
-# 3. Load dimensions (via Airflow container)
-docker exec shopzada-airflow-scheduler python /opt/airflow/repo/scripts/etl_dimensions.py
+2. **How do merchant performance metrics affect sales?**
+   - View: `vw_merchant_performance`
+   - Metrics: Revenue, delivery performance, customer reach
 
-# 4. Load facts (via Airflow container)
-docker exec shopzada-airflow-scheduler python /opt/airflow/repo/scripts/etl_facts.py
+3. **What customer segments contribute most to revenue?**
+   - View: `vw_customer_segment_revenue`
+   - Metrics: Revenue by segment, customer lifetime value
 
-# 5. Create presentation views
-Get-Content sql/presentation_layer_views.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
-```
+## 🛠️ Development
 
-### Presentation Layer Views
-- `vw_sales_summary_daily` - Daily sales metrics
-- `vw_sales_by_product_category` - Product performance
-- `vw_sales_by_customer` - Customer analytics
-- `vw_campaign_performance` - Marketing ROI
-- `vw_order_delays` - Delivery analysis
-- `vw_monthly_sales_trend` - Trend analysis
+### Running Individual Scripts
 
-See `docs/KIMBALL_ARCHITECTURE.md` for detailed architecture documentation.
-
-## Reset and Re-ingest
-
-To clear all staging data and re-run ingestion:
-
-### Option 1: Using Reset Script (Recommended)
-```powershell
-# PowerShell (Windows)
-.\scripts\reset_and_reingest.ps1
-
-# Bash (Linux/Mac/WSL)
-chmod +x scripts/reset_and_reingest.sh
-./scripts/reset_and_reingest.sh
-```
-
-### Option 2: Manual Steps
-
-**PowerShell:**
-```powershell
-# 1. Clear staging tables
-Get-Content sql/reset.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
-
-# 2. Clear Parquet exports (optional, if using Parquet export DAGs)
-# Remove-Item -Path "data/staging_parquet/*.parquet" -Force -ErrorAction SilentlyContinue
-
-# 3. Re-run ingestion via Airflow DAG
-# Open Airflow UI at http://localhost:8080 and trigger the shopzada_ingestion DAG
-# Or use: docker exec shopzada-airflow-scheduler airflow dags trigger shopzada_ingestion
-```
-
-**Bash/Linux:**
 ```bash
-# 1. Clear staging tables
-docker exec -i shopzada-db psql -U postgres -d shopzada < sql/reset.sql
+# Python ETL pipeline
+docker exec -it airflow-scheduler python /opt/airflow/repo/scripts/etl_pipeline_python.py
 
-# 2. Clear Parquet exports (optional)
-rm -f data/staging_parquet/*.parquet
-
-# 3. Re-run ingestion via Airflow DAG
-# Open Airflow UI at http://localhost:8080 and trigger the shopzada_ingestion DAG
-# Or use: docker exec shopzada-airflow-scheduler airflow dags trigger shopzada_ingestion
+# Data quality checks
+docker exec -it airflow-scheduler python /opt/airflow/repo/scripts/data_quality.py
 ```
 
-### Option 3: Using Airflow DAG
-1. Ensure services are running:
-   ```powershell
-   docker compose -f docker/docker-compose.yml up -d shopzada-db shopzada-airflow-webserver shopzada-airflow-scheduler
-   ```
-2. Clear the database manually:
-   ```powershell
-   # PowerShell
-   Get-Content sql/reset.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
-   
-   # Bash
-   docker exec -i shopzada-db psql -U postgres -d shopzada < sql/reset.sql
-   ```
-3. Open Airflow UI at http://localhost:8080
-4. Find the `shopzada_ingestion` DAG and click "Trigger DAG"
-5. The DAG will re-ingest all data into staging tables
+### Accessing Databases
 
-### Verify Reset
-```powershell
-# Check staging tables are cleared (should return 0)
-docker exec -it shopzada-db psql -U postgres -d shopzada -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'stg_%';"
+**ShopZada Database:**
+```bash
+docker exec -it shopzada-db psql -U postgres -d shopzada
 ```
 
-## Troubleshooting
+**Airflow Metadata Database:**
+```bash
+docker exec -it airflow-db psql -U airflow -d airflow
+```
 
-### Network Timeout Errors
+### Viewing Logs
 
-If you encounter `TLS handshake timeout` when pulling Docker images:
+```bash
+# Airflow scheduler logs
+docker logs airflow-scheduler
 
-1. **Pre-pull base images manually:**
-   ```powershell
-   docker pull python:3.11-slim
-   docker pull apache/airflow:2.10.2-python3.11
-   docker pull postgres:15
-   ```
+# Airflow webserver logs
+docker logs airflow-webserver
 
-2. **Then build:**
-   ```powershell
-   docker compose -f docker/docker-compose.yml build
-   ```
+# ShopZada database logs
+docker logs shopzada-db
+```
 
-3. **If errors persist**, check your network/firewall settings or try building with `--no-cache` flag.
+## 📝 Configuration
 
-### Old Dockerfile References
+### Environment Variables
 
-If you see errors about `airflow.Dockerfile` or `postgres.Dockerfile`:
-- Ensure you have the latest `docker/Dockerfile` (multi-stage build)
-- Delete any old `docker/airflow.Dockerfile` or `docker/postgres.Dockerfile` files
-- See `docker/TROUBLESHOOTING.md` for detailed solutions.
+Edit `infra/docker-compose.yml` to modify:
+- Database credentials
+- Data directory paths
+- Airflow configuration
 
+### Airflow Connection
 
+The `shopzada_postgres` connection is automatically created during initialization. To manually create:
+
+1. Airflow UI → Admin → Connections
+2. Add new connection:
+   - Conn Id: `shopzada_postgres`
+   - Conn Type: `Postgres`
+   - Host: `shopzada-db`
+   - Schema: `shopzada`
+   - Login: `postgres`
+   - Password: `postgres`
+   - Port: `5432`
+
+## 🧪 Data Quality Checks
+
+The data quality module validates:
+- ✅ Referential integrity (foreign keys)
+- ✅ Null value constraints
+- ✅ Duplicate detection
+- ✅ Data type validation
+- ✅ Range validation (e.g., prices > 0)
+
+Run quality checks:
+```bash
+docker exec -it airflow-scheduler python /opt/airflow/repo/scripts/data_quality.py
+```
+
+## 📚 Documentation
+
+- [Architecture Documentation](docs/ARCHITECTURE.md) - System architecture and design decisions
+- [Data Model Documentation](docs/DATA_MODEL.md) - Star schema design and table structures
+- [Workflow Documentation](docs/WORKFLOW.md) - ETL pipeline workflow and task dependencies
+- [Business Questions](docs/BUSINESS_QUESTIONS.md) - Key business questions and analytical views
+- [Scripts Usage](docs/SCRIPTS_USAGE.md) - Which scripts are used and which can be deleted
+
+**Dashboard Documentation:**
+- [Dashboard Design Guide](dashboard/DASHBOARD_DESIGN_GUIDE.md) - Complete guide for creating Power BI dashboards
+- [Dashboard Quick Start](dashboard/DASHBOARD_QUICK_START.md) - Quick reference for dashboard creation
+- [Power BI Setup Guide](dashboard/POWER_BI_SETUP_GUIDE.md) - Connect Power BI and create dashboards
+
+## 🐛 Troubleshooting
+
+### Containers won't start
+- Check Docker Desktop is running
+- Verify ports 5432 and 8080 are not in use
+- Check logs: `docker compose logs`
+
+### Airflow DAG not appearing
+- Wait 30-60 seconds for DAG refresh
+- Check scheduler logs: `docker logs airflow-scheduler`
+- Verify DAG files are in `airflow/dags/`
+- Check for Python syntax errors in DAG files
+- Ensure all required Python packages are installed (check requirements.txt)
+
+### Database connection errors
+- Verify `shopzada-db` container is healthy
+- Check connection string in Airflow UI
+- Ensure database is initialized
+
+### ETL pipeline failures
+- Check file paths in `/opt/airflow/data`
+- Verify file formats are supported (CSV, Parquet, JSON, Excel, Pickle, HTML)
+- Review Airflow task logs for specific errors
+- Check for data quality issues (null values, type mismatches)
+
+## 🧹 Cleanup
+
+```bash
+# Stop containers
+cd infra
+docker compose down
+
+# Remove volumes (⚠️ deletes all data)
+docker compose down -v
+```
+
+## 📄 License
+
+This project is for educational purposes as part of CSELEC1C Data Warehouse course.
+
+## 👥 Authors
+
+- Data Engineering Team
+- Course: CSELEC1C - Data Warehouse
+
+---
+
+**Note**: This is a complete Data Warehouse solution demonstrating end-to-end ETL pipeline implementation with Kimball methodology, Airflow orchestration, and business intelligence capabilities.
 

@@ -1,9 +1,11 @@
-pandas>=2.0
-pyarrow
-sqlalchemy>=1.4
+pandas
+pyarrow>=10.0.1,<10.1.0
+sqlalchemy
 psycopg2-binary
 openpyxl
 xlrd
 python-dotenv
 lxml
-apache-airflow-providers-postgres>=5.0.0
+apache-airflow-providers-postgres
+html5lib
+beautifulsoup4
