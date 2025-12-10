@@ -1,0 +1,219 @@
+name: shopzada_dwh
+
+services:
+  # ShopZada Data Warehouse Database
+  shopzada-db:
+    container_name: shopzada-db
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopzada
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    shm_size: 1gb
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    command: >
+      postgres
+      -c log_min_messages=warning
+      -c log_min_error_statement=error
+      -c log_min_duration_statement=-1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+      timeout: 5s
+      start_period: 10s
+
+  # Airflow Metadata Database
+  airflow-db:
+    container_name: airflow-db
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    command: >
+      postgres
+      -c log_min_messages=warning
+      -c log_min_error_statement=error
+      -c log_min_duration_statement=-1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      retries: 10
+      timeout: 5s
+      start_period: 10s
+
+  # Airflow Initialization
+  airflow-init:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      shopzada-db:
+        condition: service_healthy
+    entrypoint: |
+      bash -c "
+        set -e
+        echo '[INIT] Starting Airflow initialization...'
+        airflow db migrate 2>&1 | grep -v 'INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
+        echo '[INIT] Database migration completed'
+        airflow users create --username admin --firstname Air --lastname Flow --role Admin --email admin@example.com --password admin 2>&1 | grep -v 'already exist\|INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
+        echo '[INIT] Admin user check completed'
+        airflow connections delete shopzada_postgres 2>&1 | grep -v 'does not exist\|INFO\|WARNING' || true
+        echo '[INIT] Connection cleanup completed'
+        airflow connections add shopzada_postgres --conn-type postgres --conn-host shopzada-db --conn-schema shopzada --conn-login postgres --conn-password postgres --conn-port 5432 2>&1 | grep -v 'INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
+        echo '[INIT] Connection created successfully'
+        echo '[INIT] ✓ Airflow initialization completed!'
+      "
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__WEBSERVER__SECRET_KEY: magic_show_logs_please
+      AIRFLOW__API__RATE_LIMIT_ENABLED: "False"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 30
+      AIRFLOW__LOGGING__LOGGERS: "airflow.task.taskinstance:WARNING"
+      PYTHONWARNINGS: "ignore::DeprecationWarning,ignore::PendingDeprecationWarning"
+      POSTGRES_HOST: shopzada-db
+      POSTGRES_DB: shopzada
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: "5432"
+      DATA_DIR: /opt/airflow/data
+    volumes:
+      - ../workflows:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ../scripts:/opt/airflow/repo/scripts
+      - ../sql:/opt/airflow/repo/sql
+      - ../data:/opt/airflow/data
+      - ../workflows:/opt/airflow/workflows
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-db:
+        condition: service_healthy
+      shopzada-db:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW__WEBSERVER__SECRET_KEY: magic_show_logs_please
+      AIRFLOW__API__RATE_LIMIT_ENABLED: "False"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__WEBSERVER__ACCESS_LOGFILE: ""
+      AIRFLOW__WEBSERVER__ERROR_LOGFILE: ""
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 30
+      PYTHONWARNINGS: "ignore::DeprecationWarning,ignore::PendingDeprecationWarning"
+      AIRFLOW__LOGGING__LOGGERS: "airflow.task.taskinstance:WARNING"
+      POSTGRES_HOST: shopzada-db
+      POSTGRES_DB: shopzada
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: "5432"
+      DATA_DIR: /opt/airflow/data
+    volumes:
+      - ../workflows:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ../scripts:/opt/airflow/repo/scripts
+      - ../sql:/opt/airflow/repo/sql
+      - ../data:/opt/airflow/data
+      - ../workflows:/opt/airflow/workflows
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+      start_period: 30s
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+      airflow-db:
+        condition: service_healthy
+      shopzada-db:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__WEBSERVER__SECRET_KEY: magic_show_logs_please
+      AIRFLOW__API__RATE_LIMIT_ENABLED: "False"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 30
+      AIRFLOW__SCHEDULER__JOB_HEARTBEAT_SEC: 5
+      PYTHONWARNINGS: "ignore::DeprecationWarning,ignore::PendingDeprecationWarning"
+      AIRFLOW__LOGGING__LOGGERS: "airflow.task.taskinstance:WARNING"
+      POSTGRES_HOST: shopzada-db
+      POSTGRES_DB: shopzada
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: "5432"
+      DATA_DIR: /opt/airflow/data
+    volumes:
+      - ../workflows:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ../scripts:/opt/airflow/repo/scripts
+      - ../sql:/opt/airflow/repo/sql
+      - ../data:/opt/airflow/data
+      - ../workflows:/opt/airflow/workflows
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $$(hostname) || exit 1"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+      start_period: 30s
+
+volumes:
+  db_data:
+    driver: local
+  airflow_db_data:
+    driver: local

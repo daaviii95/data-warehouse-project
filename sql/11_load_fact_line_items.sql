@@ -1,27 +1,8 @@
--- Load Fact Line Items Table
--- Source: Operations Department - line_item_data files (prices + products)
--- DYNAMIC: Automatically discovers all matching staging tables
+-- Load Fact Line Items
+-- Kimball Methodology: Transaction fact table
+-- Combines line item prices and products, then joins with fact_orders for dimension keys
+-- Dynamically discovers staging tables
 
-DROP TABLE IF EXISTS fact_line_items CASCADE;
-
-CREATE TABLE fact_line_items (
-    order_id TEXT NOT NULL,
-    product_sk INTEGER NOT NULL,
-    user_sk INTEGER NOT NULL,
-    merchant_sk INTEGER NOT NULL,
-    staff_sk INTEGER NOT NULL,
-    transaction_date_sk INTEGER NOT NULL,
-    price DECIMAL(10,2),
-    quantity INTEGER,
-    PRIMARY KEY (order_id, product_sk),
-    FOREIGN KEY (product_sk) REFERENCES dim_product(product_sk),
-    FOREIGN KEY (user_sk) REFERENCES dim_user(user_sk),
-    FOREIGN KEY (merchant_sk) REFERENCES dim_merchant(merchant_sk),
-    FOREIGN KEY (staff_sk) REFERENCES dim_staff(staff_sk),
-    FOREIGN KEY (transaction_date_sk) REFERENCES dim_date(date_sk)
-);
-
--- Dynamically combine line item data from prices and products files
 DO $$
 DECLARE
     sql_query TEXT;
@@ -29,23 +10,22 @@ DECLARE
     products_tbl TEXT;
     prices_tables TEXT[] := ARRAY[]::TEXT[];
     products_tables TEXT[] := ARRAY[]::TEXT[];
-    err_msg TEXT;
 BEGIN
     -- Find all line_item_data_prices tables (any number, any format)
-    SELECT ARRAY_AGG(table_name ORDER BY table_name)
+    SELECT ARRAY_AGG(t.table_name ORDER BY t.table_name)
     INTO prices_tables
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name LIKE 'stg_operations_department_line_item_data_prices%'
-      AND table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
+    FROM information_schema.tables t
+    WHERE t.table_schema = 'public'
+      AND t.table_name LIKE 'stg_operations_department_line_item_data_prices%'
+      AND t.table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
     
     -- Find all line_item_data_products tables (any number, any format)
-    SELECT ARRAY_AGG(table_name ORDER BY table_name)
+    SELECT ARRAY_AGG(t.table_name ORDER BY t.table_name)
     INTO products_tables
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name LIKE 'stg_operations_department_line_item_data_products%'
-      AND table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
+    FROM information_schema.tables t
+    WHERE t.table_schema = 'public'
+      AND t.table_name LIKE 'stg_operations_department_line_item_data_products%'
+      AND t.table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
     
     -- Build dynamic SQL query
     IF array_length(prices_tables, 1) > 0 OR array_length(products_tables, 1) > 0 THEN
@@ -57,7 +37,9 @@ BEGIN
             LOOP
                 sql_query := sql_query || format('
             SELECT 
-                order_id, price, quantity
+                order_id::TEXT, 
+                price::DECIMAL(10,2) as price, 
+                quantity::INTEGER
             FROM %I
             WHERE order_id IS NOT NULL', prices_tbl);
                 
@@ -81,7 +63,8 @@ BEGIN
             LOOP
                 sql_query := sql_query || format('
             SELECT 
-                order_id, product_id
+                order_id::TEXT, 
+                product_id
             FROM %I
             WHERE order_id IS NOT NULL AND product_id IS NOT NULL', products_tbl);
                 
@@ -95,8 +78,24 @@ BEGIN
             sql_query := sql_query || 'SELECT NULL::TEXT as order_id, NULL::TEXT as product_id WHERE FALSE';
         END IF;
         
-        -- Complete the query - join prices and products, then get dimension keys from fact_orders
+        -- Complete the query - join prices and products by row position (matching Python merge logic)
+        -- Use ROW_NUMBER() to match rows by position since both files have same order
         sql_query := sql_query || '
+        ),
+        prices_with_row_num AS (
+            SELECT 
+                order_id,
+                price,
+                quantity,
+                ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY (SELECT NULL)) as rn
+            FROM line_item_prices
+        ),
+        products_with_row_num AS (
+            SELECT 
+                order_id,
+                product_id,
+                ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY (SELECT NULL)) as rn
+            FROM line_item_products
         ),
         combined_line_items AS (
             SELECT 
@@ -104,8 +103,8 @@ BEGIN
                 pr.product_id,
                 p.price,
                 p.quantity
-            FROM line_item_products pr
-            INNER JOIN line_item_prices p ON pr.order_id = p.order_id
+            FROM products_with_row_num pr
+            INNER JOIN prices_with_row_num p ON pr.order_id = p.order_id AND pr.rn = p.rn
             WHERE pr.order_id IS NOT NULL
               AND pr.product_id IS NOT NULL
         )
@@ -128,7 +127,6 @@ BEGIN
         
         EXECUTE sql_query;
         
-        -- Log success (using simple message to avoid format string issues)
         RAISE NOTICE 'Loaded fact_line_items successfully';
     ELSE
         RAISE WARNING 'No staging tables found for fact_line_items. Pattern: stg_operations_department_line_item_data_prices%% or stg_operations_department_line_item_data_products%%';
@@ -137,11 +135,6 @@ EXCEPTION
     WHEN undefined_table THEN
         RAISE WARNING 'One or more staging tables do not exist. Skipping fact_line_items load.';
     WHEN OTHERS THEN
-        err_msg := 'Error loading fact_line_items: ' || SQLERRM;
-        RAISE WARNING '%', err_msg;
+        RAISE WARNING 'Error loading fact_line_items: %', SQLERRM;
 END $$;
 
-CREATE INDEX idx_fact_line_items_order_id ON fact_line_items(order_id);
-CREATE INDEX idx_fact_line_items_product_sk ON fact_line_items(product_sk);
-CREATE INDEX idx_fact_line_items_user_sk ON fact_line_items(user_sk);
-CREATE INDEX idx_fact_line_items_transaction_date_sk ON fact_line_items(transaction_date_sk);

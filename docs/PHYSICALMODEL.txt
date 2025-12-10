@@ -1,0 +1,207 @@
+Table dim_campaign {
+  campaign_sk integer [primary key]
+  campaign_id varchar(50)
+  campaign_name varchar(255)
+  campaign_description text
+  discount decimal(10,2)
+}
+
+
+
+
+
+
+
+
+Table dim_product {
+  product_sk integer [primary key]
+  product_id varchar(50)
+  product_name varchar(255)
+  product_type varchar(100)
+  price decimal(10,2)
+}
+
+
+
+
+
+
+
+
+Table dim_user {
+  user_sk integer [primary key]
+  user_id varchar(50)
+  name varchar(255)
+  street varchar(255)
+  state varchar(100)
+  city varchar(100)
+  country varchar(100)
+  birthdate date
+  gender varchar(20)
+  device_address varchar(255)
+  user_type varchar(50)
+  creation_date timestamp
+}
+
+
+
+
+
+
+
+
+Table dim_staff {
+  staff_sk integer [primary key]
+  staff_id varchar(50)
+  name varchar(255)
+  street varchar(255)
+  state varchar(100)
+  city varchar(100)
+  country varchar(100)
+  job_level varchar(50)
+  contact_number varchar(50)
+  creation_date timestamp
+}
+
+
+
+
+
+
+
+
+Table dim_merchant {
+  merchant_sk integer [primary key]
+  merchant_id varchar(50)
+  name varchar(255)
+  street varchar(255)
+  state varchar(100)
+  city varchar(100)
+  country varchar(100)
+  contact_number varchar(50)
+  creation_date timestamp
+}
+
+
+
+
+
+
+
+
+Table dim_date {
+  date_sk integer [primary key]
+  date date
+  year integer(4)
+  month integer(2)
+  month_name varchar(50)
+  day integer(2)
+  quarter varchar(2)
+}
+
+
+
+
+
+
+
+
+Table dim_user_job {
+  user_job_sk integer [primary key]
+  user_id varchar(50) [ref: > dim_user.user_id]
+  job_title varchar(255)
+  job_level varchar(50)
+}
+
+
+
+
+
+
+
+
+Table dim_credit_card {
+  credit_card_sk integer [primary key]
+  user_id varchar(50) [ref: > dim_user.user_id]
+  name varchar(255)
+  credit_card_number varchar(50)
+  issuing_bank varchar(255)
+}
+
+
+
+
+
+
+
+
+Table fact_orders {
+  order_id integer(50) [not null]
+  user_sk integer [ref: > dim_user.user_sk]
+  merchant_sk integer [ref: > dim_merchant.merchant_sk]
+  staff_sk integer [ref: > dim_staff.staff_sk]
+  transaction_date_sk integer [ref: > dim_date.date_sk]
+  estimated_arrival_days integer(50)
+  delay_days integer(50)
+
+
+
+
+
+
+
+
+  primary key (user_sk, merchant_sk, staff_sk, transaction_date_sk)
+}
+
+
+
+
+
+
+
+
+Table fact_line_items {
+  order_id integer(50) [not null]
+  product_sk integer [ref: > dim_product.product_sk]
+  user_sk integer [ref: > dim_user.user_sk]
+  merchant_sk integer [ref: > dim_merchant.merchant_sk]
+  staff_sk integer [ref: > dim_staff.staff_sk]
+  transaction_date_sk integer [ref: > dim_date.date_sk]
+  price decimal(10,2)
+  quantity integer(50)
+
+
+
+
+
+
+
+
+  primary key (product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk)
+}
+
+
+
+
+
+
+
+
+Table fact_campaign_transactions {
+  order_id integer(50) [not null]
+  campaign_sk integer [ref: > dim_campaign.campaign_sk]
+  user_sk integer [ref: > dim_user.user_sk]
+  merchant_sk integer [ref: > dim_merchant.merchant_sk]
+  transaction_date_sk integer [ref: > dim_date.date_sk]
+  availed integer(1)
+
+
+
+
+
+
+
+
+  primary key (campaign_sk, user_sk, merchant_sk, transaction_date_sk)
+}

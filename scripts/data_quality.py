@@ -13,7 +13,7 @@ from sqlalchemy import text
 # Configuration
 DB_USER = os.getenv("POSTGRES_USER", "postgres")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
-DB_HOST = os.getenv("POSTGRES_HOST", "db")
+DB_HOST = os.getenv("POSTGRES_HOST", "shopzada-db")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 DB_NAME = os.getenv("POSTGRES_DB", "shopzada")
 
@@ -34,7 +34,8 @@ def check_referential_integrity():
                 FROM information_schema.tables 
                 WHERE table_schema = 'public' 
                 AND table_name IN ('fact_orders', 'fact_line_items', 'fact_campaign_transactions',
-                                   'dim_user', 'dim_merchant', 'dim_staff', 'dim_product', 'dim_campaign', 'dim_date')
+                                   'dim_user', 'dim_merchant', 'dim_staff', 'dim_product', 
+                                   'dim_campaign', 'dim_date', 'dim_user_job', 'dim_credit_card')
             """))
             existing_tables = {row[0] for row in result.fetchall()}
     except Exception as e:
@@ -99,6 +100,17 @@ def check_referential_integrity():
             """
         })
     
+    if 'fact_line_items' in existing_tables and 'fact_orders' in existing_tables:
+        checks.append({
+            'name': 'fact_line_items.order_id references fact_orders',
+            'sql': """
+                SELECT COUNT(*) as violations
+                FROM fact_line_items fli
+                LEFT JOIN fact_orders fo ON fli.order_id = fo.order_id
+                WHERE fo.order_id IS NULL
+            """
+        })
+    
     if 'fact_campaign_transactions' in existing_tables and 'dim_campaign' in existing_tables:
         checks.append({
             'name': 'fact_campaign_transactions.campaign_sk references dim_campaign',
@@ -107,6 +119,40 @@ def check_referential_integrity():
                 FROM fact_campaign_transactions fct
                 LEFT JOIN dim_campaign dc ON fct.campaign_sk = dc.campaign_sk
                 WHERE dc.campaign_sk IS NULL
+            """
+        })
+    
+    if 'fact_campaign_transactions' in existing_tables and 'fact_orders' in existing_tables:
+        checks.append({
+            'name': 'fact_campaign_transactions.order_id references fact_orders',
+            'sql': """
+                SELECT COUNT(*) as violations
+                FROM fact_campaign_transactions fct
+                LEFT JOIN fact_orders fo ON fct.order_id = fo.order_id
+                WHERE fo.order_id IS NULL
+            """
+        })
+    
+    # Check outrigger dimensions (dim_user_job and dim_credit_card reference dim_user)
+    if 'dim_user_job' in existing_tables and 'dim_user' in existing_tables:
+        checks.append({
+            'name': 'dim_user_job.user_id references dim_user',
+            'sql': """
+                SELECT COUNT(*) as violations
+                FROM dim_user_job duj
+                LEFT JOIN dim_user du ON duj.user_id = du.user_id
+                WHERE du.user_id IS NULL
+            """
+        })
+    
+    if 'dim_credit_card' in existing_tables and 'dim_user' in existing_tables:
+        checks.append({
+            'name': 'dim_credit_card.user_id references dim_user',
+            'sql': """
+                SELECT COUNT(*) as violations
+                FROM dim_credit_card dcc
+                LEFT JOIN dim_user du ON dcc.user_id = du.user_id
+                WHERE du.user_id IS NULL
             """
         })
     
@@ -304,20 +350,39 @@ def check_data_types():
 
 def check_record_counts():
     """Check record counts for reasonableness"""
+    # First check which tables exist
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name IN ('dim_campaign', 'dim_product', 'dim_user', 'dim_staff', 
+                                   'dim_merchant', 'dim_date', 'dim_user_job', 'dim_credit_card',
+                                   'fact_orders', 'fact_line_items', 'fact_campaign_transactions')
+            """))
+            existing_tables = {row[0] for row in result.fetchall()}
+    except Exception as e:
+        logging.warning(f"Could not check existing tables: {e}. Skipping record count checks.")
+        return
+    
     tables = [
         'dim_campaign', 'dim_product', 'dim_user', 'dim_staff', 
-        'dim_merchant', 'dim_date', 'fact_orders', 'fact_line_items', 
-        'fact_campaign_transactions'
+        'dim_merchant', 'dim_date', 'dim_user_job', 'dim_credit_card',
+        'fact_orders', 'fact_line_items', 'fact_campaign_transactions'
     ]
     
     with engine.connect() as conn:
         for table in tables:
-            try:
-                result = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))
-                count = result.fetchone()[0]
-                logging.info(f"📊 {table}: {count:,} records")
-            except Exception as e:
-                logging.error(f"❌ Error checking {table}: {e}")
+            if table in existing_tables:
+                try:
+                    result = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    count = result.fetchone()[0]
+                    logging.info(f"📊 {table}: {count:,} records")
+                except Exception as e:
+                    logging.warning(f"⚠️  Could not check {table}: {e}")
+            else:
+                logging.debug(f"📊 {table}: Table does not exist yet (skipped) - this is normal if ETL hasn't run")
 
 def run_all_checks():
     """Run all data quality checks"""

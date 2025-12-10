@@ -6,3 +6,4 @@ openpyxl
 xlrd
 python-dotenv
 lxml
+apache-airflow-providers-postgres>=5.0.0

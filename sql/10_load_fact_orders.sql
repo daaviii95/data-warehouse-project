@@ -1,66 +1,48 @@
--- Load Fact Orders Table
--- Source: Operations Department - order_data files + order_with_merchant_data + order_delays
--- DYNAMIC: Automatically discovers all matching staging tables
+-- Load Fact Orders
+-- Kimball Methodology: Transaction fact table
+-- Combines order data from multiple staging sources
+-- Dynamically discovers staging tables
 
--- Set lock timeout to prevent deadlocks (30 seconds)
+-- Set lock timeout to prevent deadlocks
 SET lock_timeout = '30s';
 
-DROP TABLE IF EXISTS fact_orders CASCADE;
-
-CREATE TABLE fact_orders (
-    order_id TEXT NOT NULL,
-    user_sk INTEGER NOT NULL,
-    merchant_sk INTEGER NOT NULL,
-    staff_sk INTEGER NOT NULL,
-    transaction_date_sk INTEGER NOT NULL,
-    estimated_arrival_days INTEGER,
-    delay_days INTEGER,
-    PRIMARY KEY (order_id),
-    FOREIGN KEY (user_sk) REFERENCES dim_user(user_sk),
-    FOREIGN KEY (merchant_sk) REFERENCES dim_merchant(merchant_sk),
-    FOREIGN KEY (staff_sk) REFERENCES dim_staff(staff_sk),
-    FOREIGN KEY (transaction_date_sk) REFERENCES dim_date(date_sk)
-);
-
--- Dynamically combine all order data sources
 DO $$
 DECLARE
     sql_query TEXT;
     order_data_query TEXT;
     merchant_data_query TEXT;
+    delay_query TEXT;
     order_tbl TEXT;
     merchant_tbl TEXT;
     delay_tbl TEXT;
     order_tables TEXT[] := ARRAY[]::TEXT[];
     merchant_tables TEXT[] := ARRAY[]::TEXT[];
     delay_tables TEXT[] := ARRAY[]::TEXT[];
-    delay_query TEXT;
-    err_msg TEXT;
 BEGIN
     -- Find all order_data tables (any format/extension)
-    SELECT ARRAY_AGG(table_name ORDER BY table_name)
+    SELECT ARRAY_AGG(t.table_name ORDER BY t.table_name)
     INTO order_tables
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name LIKE 'stg_operations_department_order_data_%'
-      AND table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
+    FROM information_schema.tables t
+    WHERE t.table_schema = 'public'
+      AND t.table_name LIKE 'stg_operations_department_order_data%'
+      AND t.table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
     
     -- Find all order_with_merchant_data tables
-    SELECT ARRAY_AGG(table_name ORDER BY table_name)
+    SELECT ARRAY_AGG(t.table_name ORDER BY t.table_name)
     INTO merchant_tables
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name LIKE 'stg_enterprise_department_order_with_merchant_data%'
-      AND table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
+    FROM information_schema.tables t
+    WHERE t.table_schema = 'public'
+      AND t.table_name LIKE 'stg_enterprise_department_order_with_merchant_data%'
+      AND t.table_name NOT LIKE '%_tbl%';  -- Exclude HTML sub-tables
     
     -- Find all order_delays tables (including HTML sub-tables)
-    SELECT ARRAY_AGG(table_name ORDER BY table_name)
+    SELECT ARRAY_AGG(t.table_name ORDER BY t.table_name)
     INTO delay_tables
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name LIKE 'stg_operations_department_order_delays%';
+    FROM information_schema.tables t
+    WHERE t.table_schema = 'public'
+      AND t.table_name LIKE 'stg_operations_department_order_delays%';
     
-    -- Build dynamic SQL query with separate CTEs for order_data and order_with_merchant_data
+    -- Build dynamic SQL query with separate CTEs
     IF array_length(order_tables, 1) > 0 OR array_length(merchant_tables, 1) > 0 THEN
         -- Build order_data CTE (has user_id, transaction_date, "estimated arrival")
         order_data_query := '';
@@ -70,7 +52,7 @@ BEGIN
             LOOP
                 order_data_query := order_data_query || format('
             SELECT 
-                order_id, 
+                order_id::TEXT, 
                 user_id, 
                 transaction_date, 
                 "estimated arrival"::INTEGER as estimated_arrival_days
@@ -94,7 +76,7 @@ BEGIN
             LOOP
                 merchant_data_query := merchant_data_query || format('
             SELECT 
-                order_id, 
+                order_id::TEXT, 
                 merchant_id, 
                 staff_id
             FROM %I
@@ -122,12 +104,10 @@ BEGIN
                 delay_query := delay_query || format('SELECT order_id::TEXT, "delay in days"::INTEGER as delay_days FROM %I', delay_tbl);
             END LOOP;
         ELSE
-            -- If no delay tables exist, create empty subquery
             delay_query := 'SELECT NULL::TEXT as order_id, NULL::INTEGER as delay_days WHERE FALSE';
         END IF;
         
-        -- Complete the query - join order_data with order_with_merchant_data on order_id to combine fields
-        -- Use INNER JOIN to only get orders that have both user data and merchant/staff data
+        -- Complete the query - join order_data with order_with_merchant_data on order_id
         sql_query := sql_query || ',
         combined_orders AS (
             SELECT 
@@ -169,20 +149,16 @@ BEGIN
         WHERE o.order_id IS NOT NULL
         ON CONFLICT (order_id) DO NOTHING';
         
-        -- Execute the query
         EXECUTE sql_query;
+        
+        RAISE NOTICE 'Loaded fact_orders successfully';
     ELSE
-        RAISE WARNING 'No staging tables found for fact_orders. Pattern: stg_operations_department_order_data_%% or stg_enterprise_department_order_with_merchant_data%%';
+        RAISE WARNING 'No staging tables found for fact_orders. Pattern: stg_operations_department_order_data%% or stg_enterprise_department_order_with_merchant_data%%';
     END IF;
 EXCEPTION
     WHEN undefined_table THEN
         RAISE WARNING 'One or more staging tables do not exist. Skipping fact_orders load.';
     WHEN OTHERS THEN
-        err_msg := 'Error loading fact_orders: ' || SQLERRM;
-        RAISE WARNING '%', err_msg;
+        RAISE WARNING 'Error loading fact_orders: %', SQLERRM;
 END $$;
 
-CREATE INDEX idx_fact_orders_order_id ON fact_orders(order_id);
-CREATE INDEX idx_fact_orders_user_sk ON fact_orders(user_sk);
-CREATE INDEX idx_fact_orders_merchant_sk ON fact_orders(merchant_sk);
-CREATE INDEX idx_fact_orders_transaction_date_sk ON fact_orders(transaction_date_sk);
