@@ -1056,9 +1056,12 @@ def load_fact_orders():
     
     logging.info(f"Loaded mappings: {len(date_map)} dates, {len(user_map)} users, {len(merchant_map)} merchants, {len(staff_map)} staff")
     
-    # Prepare data for bulk insert
-    logging.info("Preparing fact_orders data for bulk insert...")
-    fact_rows = []
+    # Prepare data for bulk insert in batches to avoid memory issues
+    logging.info("Preparing fact_orders data for batched bulk insert...")
+    BATCH_SIZE = 10000  # Process 10k rows at a time to avoid OOM
+    
+    total_inserted = 0
+    batch_rows = []
     
     for _, row in order_data.iterrows():
         try:
@@ -1091,7 +1094,7 @@ def load_fact_orders():
             delay_days_val = get_column_value(row, ['delay_days', 'delay in days', 'delay_in_days'])
             delay_days = extract_numeric(delay_days_val) if delay_days_val is not None else -1
             
-            fact_rows.append({
+            batch_rows.append({
                 'order_id': str(row.get('order_id')),
                 'user_sk': user_sk,
                 'merchant_sk': merchant_sk,
@@ -1100,13 +1103,27 @@ def load_fact_orders():
                 'estimated_arrival_days': estimated_arrival_days,
                 'delay_days': delay_days
             })
+            
+            # Insert when batch is full
+            if len(batch_rows) >= BATCH_SIZE:
+                logging.info(f"Bulk inserting batch of {len(batch_rows)} orders (total so far: {total_inserted})...")
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO fact_orders (order_id, user_sk, merchant_sk, staff_sk, transaction_date_sk, estimated_arrival_days, delay_days)
+                        VALUES (:order_id, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :estimated_arrival_days, :delay_days)
+                        ON CONFLICT (order_id) DO UPDATE SET
+                            estimated_arrival_days = EXCLUDED.estimated_arrival_days,
+                            delay_days = EXCLUDED.delay_days
+                    """), batch_rows)
+                total_inserted += len(batch_rows)
+                batch_rows = []  # Clear batch to free memory
         except Exception as e:
             logging.warning(f"Error preparing order {row.get('order_id')}: {e}")
             continue
     
-    # Bulk insert using executemany (much faster than row-by-row)
-    if fact_rows:
-        logging.info(f"Bulk inserting {len(fact_rows)} orders...")
+    # Insert remaining rows
+    if batch_rows:
+        logging.info(f"Bulk inserting final batch of {len(batch_rows)} orders...")
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO fact_orders (order_id, user_sk, merchant_sk, staff_sk, transaction_date_sk, estimated_arrival_days, delay_days)
@@ -1114,9 +1131,10 @@ def load_fact_orders():
                 ON CONFLICT (order_id) DO UPDATE SET
                     estimated_arrival_days = EXCLUDED.estimated_arrival_days,
                     delay_days = EXCLUDED.delay_days
-            """), fact_rows)
+            """), batch_rows)
+        total_inserted += len(batch_rows)
     
-    logging.info(f"Loaded {len(fact_rows)} orders into fact_orders")
+    logging.info(f"Loaded {total_inserted} orders into fact_orders")
 
 def load_fact_line_items():
     """Load fact_line_items - combines prices and products by row position"""
@@ -1200,11 +1218,14 @@ def load_fact_line_items():
     
     logging.info(f"Loaded mappings: {len(product_map)} products, {len(order_map)} orders")
     
-    # Prepare data for bulk insert
-    logging.info("Preparing fact_line_items data for bulk insert...")
-    fact_rows = []
+    # Prepare data for bulk insert in batches to avoid memory issues
+    logging.info("Preparing fact_line_items data for batched bulk insert...")
+    BATCH_SIZE = 10000  # Process 10k rows at a time to avoid OOM
     
-    for _, row in combined.iterrows():
+    total_inserted = 0
+    batch_rows = []
+    
+    for idx, row in combined.iterrows():
         try:
             # Get product_sk from pre-loaded map
             product_id = str(row.get('product_id'))
@@ -1218,7 +1239,7 @@ def load_fact_line_items():
             if not order_keys:
                 continue
             
-            fact_rows.append({
+            batch_rows.append({
                 'order_id': order_id,
                 'product_sk': product_sk,
                 'user_sk': order_keys['user_sk'],
@@ -1228,21 +1249,34 @@ def load_fact_line_items():
                 'price': float(row.get('price', 0)) if pd.notna(row.get('price')) else None,
                 'quantity': extract_numeric(row.get('quantity')) or 0
             })
+            
+            # Insert when batch is full
+            if len(batch_rows) >= BATCH_SIZE:
+                logging.info(f"Bulk inserting batch of {len(batch_rows)} line items (total so far: {total_inserted})...")
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO fact_line_items (order_id, product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk, price, quantity)
+                        VALUES (:order_id, :product_sk, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :price, :quantity)
+                        ON CONFLICT (order_id, product_sk) DO NOTHING
+                    """), batch_rows)
+                total_inserted += len(batch_rows)
+                batch_rows = []  # Clear batch to free memory
         except Exception as e:
             logging.warning(f"Error preparing line item {row.get('order_id')}: {e}")
             continue
     
-    # Bulk insert
-    if fact_rows:
-        logging.info(f"Bulk inserting {len(fact_rows)} line items...")
+    # Insert remaining rows
+    if batch_rows:
+        logging.info(f"Bulk inserting final batch of {len(batch_rows)} line items...")
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO fact_line_items (order_id, product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk, price, quantity)
                 VALUES (:order_id, :product_sk, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :price, :quantity)
                 ON CONFLICT (order_id, product_sk) DO NOTHING
-            """), fact_rows)
+            """), batch_rows)
+        total_inserted += len(batch_rows)
     
-    logging.info(f"Loaded {len(fact_rows)} line items into fact_line_items")
+    logging.info(f"Loaded {total_inserted} line items into fact_line_items")
 
 def load_fact_campaign_transactions():
     """Load fact_campaign_transactions"""
@@ -1290,9 +1324,12 @@ def load_fact_campaign_transactions():
     
     logging.info(f"Loaded mappings: {len(campaign_map)} campaigns, {len(order_map)} orders")
     
-    # Prepare data for bulk insert
-    logging.info("Preparing fact_campaign_transactions data for bulk insert...")
-    fact_rows = []
+    # Prepare data for bulk insert in batches to avoid memory issues
+    logging.info("Preparing fact_campaign_transactions data for batched bulk insert...")
+    BATCH_SIZE = 10000  # Process 10k rows at a time to avoid OOM
+    
+    total_inserted = 0
+    batch_rows = []
     
     for _, row in combined.iterrows():
         try:
@@ -1317,7 +1354,7 @@ def load_fact_campaign_transactions():
             else:
                 availed = 0
             
-            fact_rows.append({
+            batch_rows.append({
                 'order_id': order_id,
                 'campaign_sk': campaign_sk,
                 'user_sk': order_keys['user_sk'],
@@ -1325,21 +1362,34 @@ def load_fact_campaign_transactions():
                 'transaction_date_sk': order_keys['transaction_date_sk'],
                 'availed': availed
             })
+            
+            # Insert when batch is full
+            if len(batch_rows) >= BATCH_SIZE:
+                logging.info(f"Bulk inserting batch of {len(batch_rows)} campaign transactions (total so far: {total_inserted})...")
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO fact_campaign_transactions (order_id, campaign_sk, user_sk, merchant_sk, transaction_date_sk, availed)
+                        VALUES (:order_id, :campaign_sk, :user_sk, :merchant_sk, :transaction_date_sk, :availed)
+                        ON CONFLICT (campaign_sk, user_sk, merchant_sk, transaction_date_sk) DO NOTHING
+                    """), batch_rows)
+                total_inserted += len(batch_rows)
+                batch_rows = []  # Clear batch to free memory
         except Exception as e:
             logging.warning(f"Error preparing campaign transaction {row.get('order_id')}: {e}")
             continue
     
-    # Bulk insert
-    if fact_rows:
-        logging.info(f"Bulk inserting {len(fact_rows)} campaign transactions...")
+    # Insert remaining rows
+    if batch_rows:
+        logging.info(f"Bulk inserting final batch of {len(batch_rows)} campaign transactions...")
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO fact_campaign_transactions (order_id, campaign_sk, user_sk, merchant_sk, transaction_date_sk, availed)
                 VALUES (:order_id, :campaign_sk, :user_sk, :merchant_sk, :transaction_date_sk, :availed)
                 ON CONFLICT (campaign_sk, user_sk, merchant_sk, transaction_date_sk) DO NOTHING
-            """), fact_rows)
+            """), batch_rows)
+        total_inserted += len(batch_rows)
     
-    logging.info(f"Loaded {len(fact_rows)} campaign transactions into fact_campaign_transactions")
+    logging.info(f"Loaded {total_inserted} campaign transactions into fact_campaign_transactions")
 
 def main():
     """Main ETL pipeline - similar to original Python scripts"""
