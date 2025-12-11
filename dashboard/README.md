@@ -67,5 +67,5 @@ All dashboards use the following analytical views from the data warehouse:
 - All views are pre-aggregated for optimal performance
 - Views are updated when the ETL pipeline runs
 - Use DirectQuery mode for real-time data or Import mode for better performance
-- See troubleshooting sections in each guide for common issues
+- See troubleshooting sections in each guide for common issues.
 
