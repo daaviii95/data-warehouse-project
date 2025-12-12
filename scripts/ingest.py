@@ -1,449 +1,852 @@
 #!/usr/bin/env python3
 """
-Unified ingestion script for Week 2.
-- Scans /data mounted folder for files (recursive)
-- Detects file type by extension, loads into pandas, does light cleaning,
-  and writes to Postgres staging tables via SQLAlchemy.
-- CSVs are read in chunks.
-- Logs ingestion attempts into ingestion_log table.
+Ingest Data Per Department into Staging Tables
+Loads raw data files from each department into corresponding staging tables
+Direct ingestion from source files (CSV, JSON, HTML, Excel, Pickle, Parquet, etc.)
 """
 
 import os
-import re
 import sys
 import logging
-import hashlib
+import pandas as pd
 from pathlib import Path
 from urllib.parse import quote_plus
-
-import pandas as pd
 import sqlalchemy
 from sqlalchemy import text
+from datetime import datetime
 
-# CONFIG via env vars (change as needed)
+# Import shared utilities from etl_pipeline_python
+sys.path.insert(0, os.path.dirname(__file__))
+from etl_pipeline_python import (
+    load_file, find_files, clean_dataframe,
+    parse_discount, extract_numeric, clean_value,
+    format_product_type, format_name, format_address,
+    format_phone_number, format_gender, format_user_type,
+    format_job_title, format_job_level, format_credit_card_number,
+    format_issuing_bank, format_campaign_description, format_product_name,
+    format_campaign_name
+)
+
+# Configuration
 DB_USER = os.getenv("POSTGRES_USER", "postgres")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
-DB_HOST = os.getenv("POSTGRES_HOST", "db")
+DB_HOST = os.getenv("POSTGRES_HOST", "shopzada-db")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 DB_NAME = os.getenv("POSTGRES_DB", "shopzada")
 DATA_DIR = os.getenv("DATA_DIR", "/opt/airflow/data")
-CSV_CHUNK_SIZE = int(os.getenv("CSV_CHUNK_SIZE", "20000"))  # rows per chunk for CSVs
+# Set to True to force full reload (ignore processed files tracking)
+FORCE_FULL_RELOAD = os.getenv("FORCE_FULL_RELOAD", "false").lower() == "true"
 
-# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # Build SQLAlchemy engine
 password_quoted = quote_plus(DB_PASS)
 engine_url = f"postgresql+psycopg2://{DB_USER}:{password_quoted}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-logging.info(f"Connecting to DB: {DB_HOST}:{DB_PORT}/{DB_NAME} as {DB_USER}")
 engine = sqlalchemy.create_engine(engine_url, pool_size=5, max_overflow=10, future=True)
 
-# useful helpers
-def sanitize_table_name(path: Path) -> str:
-    """
-    Create table name based on relative path: stg_<department>_<filename_noext>
-    Removes file extension for cleaner names.
-    non-alphanum -> underscore, all lower-case.
-    Truncates to 63 characters (PostgreSQL identifier limit).
+def _get_processed_files(table_name):
+    """Get set of file paths that have already been processed for a staging table"""
+    if FORCE_FULL_RELOAD:
+        return set()
     
-    If multiple files with same name but different extensions exist, 
-    they will be handled by appending a numeric suffix.
-    """
-    rel = path.relative_to(Path(DATA_DIR))
-    parts = list(rel.parts)
-    
-    # Remove file extension from the filename (last part)
-    if parts:
-        filename = parts[-1]
-        # Remove extension
-        filename_no_ext = Path(filename).stem
-        parts[-1] = filename_no_ext
-    
-    # Join parts: department_filename
-    name = "_".join(parts)
-    name = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").lower()
-    table_name = f"stg_{name}"
-    
-    # PostgreSQL identifier limit is 63 characters
-    if len(table_name) > 63:
-        # Truncate and add hash suffix for uniqueness
-        name_hash = hashlib.md5(name.encode()).hexdigest()[:8]
-        max_base_len = 63 - len(f"stg_{name_hash}") - 1
-        truncated_name = name[:max_base_len]
-        table_name = f"stg_{truncated_name}_{name_hash}"
-        logging.warning(f"Table name truncated to 63 chars: {table_name} (original: stg_{name[:50]}...)")
-    
-    return table_name
-
-def drop_unnamed(df: pd.DataFrame) -> pd.DataFrame:
-    cols_to_drop = [c for c in df.columns if re.match(r"^Unnamed", str(c))]
-    if cols_to_drop:
-        logging.debug(f"Dropping columns {cols_to_drop}")
-        return df.drop(columns=cols_to_drop)
-    return df
-
-def normalize_discount(col: pd.Series) -> pd.Series:
-    # remove non-digit characters, guard empty -> NaN, convert to float percent (0-100)
-    if col.dtype == object or col.dtype.name == "string":
-        s = col.astype(str).str.lower().str.replace("%", "")
-        s = s.str.replace("percent", "").str.replace("pct", "").str.replace("%%", "", regex=False)
-        # extract digits
-        s = s.str.extract(r"([0-9]+(?:\.[0-9]+)?)")[0]
-        return pd.to_numeric(s, errors="coerce")
-    else:
-        return pd.to_numeric(col, errors="coerce")
-
-def normalize_quantity(col: pd.Series) -> pd.Series:
-    # extract first integer from textual quantities like '4pcs', '5piece', '6PC'
-    s = col.astype(str).str.extract(r"([0-9]+)")[0]
-    return pd.to_numeric(s, errors="coerce").astype("Int64")
-
-def normalize_estimated_arrival(col: pd.Series) -> pd.Series:
-    """
-    Converts formats like '10days', '3 days', '11d', '5day' → integer number of days.
-    Returns Int64 with nullable support.
-    """
-    s = col.astype(str)
-
-    # Extract the number before 'day' or 'days'
-    extracted = s.str.extract(r"(\d+)\s*day", expand=False)
-
-    return pd.to_numeric(extracted, errors="coerce").astype("Int64")
-
-def light_clean(df: pd.DataFrame) -> pd.DataFrame:
-    df = drop_unnamed(df)
-
-    for c in df.columns:
-        lc = c.lower()
-
-        # discount column
-        if "discount" in lc:
-            df[c] = normalize_discount(df[c])
-
-        # quantity column
-        if "quantity" in lc:
-            df[c] = normalize_quantity(df[c])
-
-        # estimated arrival column
-        if "estimated" in lc and "arrival" in lc:
-            logging.info("Normalizing estimated arrival column: %s", c)
-            df[c] = normalize_estimated_arrival(df[c])
-
-        # any date-like column
-        if re.search(r"(date|transaction_date|creation_date)", lc):
-            try:
-                df[c] = pd.to_datetime(df[c], errors="coerce")
-            except:
-                pass
-
-    return df
-
-def write_chunk_to_db(df: pd.DataFrame, table_name: str):
-    # attempt to append, create table if not exists
-    if df.empty:
-        logging.info("Empty chunk, skipping write.")
-        return
-    try:
-        # Use smaller chunksize and add timeout handling for better resilience
-        df.to_sql(name=table_name, con=engine, if_exists="append", index=False, method="multi", chunksize=1000)
-    except KeyboardInterrupt:
-        # Re-raise keyboard interrupts (SIGTERM) to allow proper cleanup
-        raise
-    except Exception as e:
-        logging.exception("Failed to write to DB for table %s: %s", table_name, e)
-        raise
-
-def log_ingestion(file_path: str, table_name: str, rows: int, status: str, message: str = None):
-    # create ingestion_log table if not exists and insert a row
-    create_stmt = text("""
-    CREATE TABLE IF NOT EXISTS ingestion_log (
-      id SERIAL PRIMARY KEY,
-      file_path TEXT,
-      table_name TEXT,
-      rows_ingested BIGINT,
-      status TEXT,
-      message TEXT,
-      ts TIMESTAMPTZ DEFAULT now()
-    );
-    """)
-    with engine.begin() as conn:
-        conn.execute(create_stmt)
-        insert_stmt = text("INSERT INTO ingestion_log (file_path, table_name, rows_ingested, status, message) VALUES (:file_path, :table_name, :rows, :status, :message)")
-        conn.execute(insert_stmt, {"file_path": file_path, "table_name": table_name, "rows": rows, "status": status, "message": message})
-
-def detect_delimiter(path: Path):
-    """
-    Detect the dominant delimiter in the first few KB of the file.
-    Handles comma, tab, semicolon, pipe.
-    Falls back to comma if unclear.
-    """
-    try:
-        with open(path, "r", encoding="utf-8-sig") as f:
-            sample = f.read(4096)
-    except Exception:
-        return ","
-
-    counts = {
-        ",": sample.count(","),
-        "\t": sample.count("\t"),
-        ";": sample.count(";"),
-        "|": sample.count("|")
-    }
-
-    # pick the delimiter with the highest occurrences
-    sep = max(counts, key=counts.get)
-
-    # if no delimiter at all, default to comma
-    if counts[sep] == 0:
-        return ","
-
-    # special case: CSV almost always uses comma, 
-    # unless tab clearly dominates
-        
-    return sep
-
-def process_csv(path: Path, table_name: str):
-    """
-    Load CSV or TSV (tab-separated) with automatic delimiter detection.
-    Handles quoting issues, BOM, and pandas fallback.
-    """
-
-    logging.info(f"Processing CSV/TSV: {path}")
-    total_rows = 0
-    last_chunk_rows = 0
-
-    # 1. Detect delimiter
-    sep = detect_delimiter(path)
-    logging.info(f"Detected delimiter for {path.name}: {repr(sep)}")
-
-    try:
-        # 2. Read in chunks with correct delimiter
-        for chunk in pd.read_csv(
-            path,
-            chunksize=CSV_CHUNK_SIZE,
-            sep=sep,
-            engine="python",
-            encoding="utf-8-sig",
-            quotechar='"',
-            doublequote=True,
-            on_bad_lines="skip"   # pandas 2.x compatible
-        ):
-            logging.debug(f"Preview for {table_name}:\n{chunk.head()}")
-
-            # Clean + load
-            chunk = light_clean(chunk)
-            write_chunk_to_db(chunk, table_name)
-            last_chunk_rows = len(chunk)
-            total_rows += last_chunk_rows
-            logging.debug(f"Processed {total_rows} rows so far from {path.name}")
-
-        log_ingestion(str(path), table_name, total_rows, "success", None)
-        logging.info(f"Finished ingesting {path.name} → {total_rows} rows")
-
-    except KeyboardInterrupt:
-        # Task was terminated - log partial progress
-        logging.warning(f"Ingestion interrupted for {path.name}. Processed {total_rows} rows before termination.")
-        log_ingestion(str(path), table_name, total_rows, "interrupted", "Task received SIGTERM")
-        raise  # Re-raise to allow Airflow to handle the termination
-    except Exception as e:
-        logging.exception(f"Error processing CSV file: {path}")
-        log_ingestion(str(path), table_name, total_rows, "failed", str(e))
-
-def process_parquet(path: Path, table_name: str):
-    logging.info("Processing parquet: %s", path)
-    try:
-        df = pd.read_parquet(path)
-        df = light_clean(df)
-        write_chunk_to_db(df, table_name)
-        log_ingestion(str(path), table_name, len(df), "success", None)
-        logging.info("Finished parquet %s -> %d rows", path, len(df))
-    except KeyboardInterrupt:
-        logging.warning(f"Ingestion interrupted for {path.name}")
-        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
-        raise
-    except Exception as e:
-        logging.exception("Error processing parquet %s", path)
-        log_ingestion(str(path), table_name, 0, "failed", str(e))
-
-def process_json(path: Path, table_name: str):
-    logging.info("Processing json: %s", path)
-    try:
-        df = pd.read_json(path, lines=False)
-        df = light_clean(df)
-        write_chunk_to_db(df, table_name)
-        log_ingestion(str(path), table_name, len(df), "success", None)
-        logging.info("Finished json %s -> %d rows", path, len(df))
-    except KeyboardInterrupt:
-        logging.warning(f"Ingestion interrupted for {path.name}")
-        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
-        raise
-    except Exception as e:
-        logging.exception("Error processing json %s", path)
-        log_ingestion(str(path), table_name, 0, "failed", str(e))
-
-def process_excel(path: Path, table_name: str):
-    logging.info("Processing excel: %s", path)
-    try:
-        df = pd.read_excel(path)
-        df = light_clean(df)
-        write_chunk_to_db(df, table_name)
-        log_ingestion(str(path), table_name, len(df), "success", None)
-        logging.info("Finished excel %s -> %d rows", path, len(df))
-    except KeyboardInterrupt:
-        logging.warning(f"Ingestion interrupted for {path.name}")
-        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
-        raise
-    except Exception as e:
-        logging.exception("Error processing excel %s", path)
-        log_ingestion(str(path), table_name, 0, "failed", str(e))
-
-def process_pickle(path: Path, table_name: str):
-    logging.info("Processing pickle: %s", path)
-    try:
-        df = pd.read_pickle(path)
-        df = light_clean(df)
-        write_chunk_to_db(df, table_name)
-        log_ingestion(str(path), table_name, len(df), "success", None)
-        logging.info("Finished pickle %s -> %d rows", path, len(df))
-    except KeyboardInterrupt:
-        logging.warning(f"Ingestion interrupted for {path.name}")
-        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
-        raise
-    except Exception as e:
-        logging.exception("Error processing pickle %s", path)
-        log_ingestion(str(path), table_name, 0, "failed", str(e))
-
-def process_html(path: Path, table_name: str):
-    logging.info("Processing html: %s", path)
-    try:
-        dfs = pd.read_html(path)
-        # if multiple tables, load them with suffix
-        total = 0
-        for i, df in enumerate(dfs):
-            df = light_clean(df)
-            tn = table_name if i == 0 else f"{table_name}_tbl{i}"
-            write_chunk_to_db(df, tn)
-            total += len(df)
-        log_ingestion(str(path), table_name, total, "success", None)
-        logging.info("Finished html %s -> %d rows across %d tables", path, total, len(dfs))
-    except KeyboardInterrupt:
-        logging.warning(f"Ingestion interrupted for {path.name}")
-        log_ingestion(str(path), table_name, 0, "interrupted", "Task received SIGTERM")
-        raise
-    except Exception as e:
-        logging.exception("Error processing html %s", path)
-        log_ingestion(str(path), table_name, 0, "failed", str(e))
-
-def is_file_already_ingested(file_path: str, table_name: str) -> bool:
-    """Check if a file has already been successfully ingested"""
     try:
         with engine.connect() as conn:
-            # First check if ingestion_log table exists
-            result = conn.execute(text("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'ingestion_log'
-                )
+            result = conn.execute(text(f"""
+                SELECT DISTINCT file_source 
+                FROM {table_name}
+                WHERE file_source IS NOT NULL
             """))
-            table_exists = result.fetchone()[0]
-            
-            if not table_exists:
-                # Table doesn't exist yet, so file hasn't been ingested
-                return False
-            
-            # Table exists, check if file was successfully ingested
-            result = conn.execute(text("""
-                SELECT COUNT(*) 
-                FROM ingestion_log 
-                WHERE file_path = :file_path 
-                AND table_name = :table_name 
-                AND status = 'success'
-            """), {"file_path": file_path, "table_name": table_name})
-            count = result.fetchone()[0]
-            return count > 0
+            return {row[0] for row in result}
     except Exception as e:
-        # If query fails, assume not ingested (safe default)
-        logging.debug("Could not check ingestion log: %s", e)
-        return False
+        # Table might not exist or be empty, return empty set
+        logging.debug(f"Could not get processed files for {table_name}: {e}")
+        return set()
 
-def process_file(path: Path):
-    ext = path.suffix.lower()
-    table_name = sanitize_table_name(path)
-    file_path_str = str(path)
+def _should_process_file(file_path, table_name, processed_files):
+    """
+    Determine if a file should be processed
     
-    # Check if file has already been successfully ingested
-    if is_file_already_ingested(file_path_str, table_name):
-        logging.info("File already ingested, skipping: %s", path)
-        return
+    Args:
+        file_path: Path to the file
+        table_name: Staging table name
+        processed_files: Set of already processed file paths
     
-    logging.info("Processing %s as %s", path, ext)
+    Returns:
+        tuple: (should_process: bool, reason: str)
+    """
+    if FORCE_FULL_RELOAD:
+        return True, "FORCE_FULL_RELOAD is enabled"
+    
+    file_path_str = str(file_path)
+    
+    # Check if file has been processed
+    if file_path_str in processed_files:
+        # Check if file was modified since last ingestion
+        try:
+            file_mtime = os.path.getmtime(file_path)
+            file_mtime_dt = datetime.fromtimestamp(file_mtime)
+            
+            # Get last ingestion time for this file
+            with engine.connect() as conn:
+                result = conn.execute(text(f"""
+                    SELECT MAX(loaded_at) 
+                    FROM {table_name}
+                    WHERE file_source = :file_source
+                """), {'file_source': file_path_str})
+                row = result.fetchone()
+                
+                if row and row[0]:
+                    last_loaded = row[0]
+                    if isinstance(last_loaded, str):
+                        last_loaded = datetime.fromisoformat(last_loaded.replace('Z', '+00:00'))
+                    
+                    # If file was modified after last load, re-process it
+                    if file_mtime_dt > last_loaded.replace(tzinfo=None):
+                        return True, f"File modified after last ingestion (modified: {file_mtime_dt}, last loaded: {last_loaded})"
+                    else:
+                        return False, f"File already processed and not modified (last loaded: {last_loaded})"
+                else:
+                    return False, "File already processed (no timestamp available)"
+        except Exception as e:
+            logging.warning(f"Could not check file modification time for {file_path}: {e}")
+            # If we can't check, assume it needs processing (safer)
+            return True, f"Could not verify file status, will process: {e}"
+    
+    return True, "File not yet processed"
 
-    if ext in [".csv"]:
-        process_csv(path, table_name)
-    elif ext in [".parquet", ".pq"]:
-        process_parquet(path, table_name)
-    elif ext in [".json"]:
-        process_json(path, table_name)
-    elif ext in [".xlsx", ".xls"]:
-        process_excel(path, table_name)
-    elif ext in [".pkl", ".pickle"]:
-        process_pickle(path, table_name)
-    elif ext in [".html", ".htm"]:
-        process_html(path, table_name)
-    else:
-        logging.warning("Unsupported file type %s for file %s", ext, path)
-        log_ingestion(str(path), table_name, 0, "skipped", f"Unsupported ext {ext}")
+def _check_staging_tables():
+    """Check if staging tables exist and validate schema matches physical model"""
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = 'stg_marketing_department_campaign_data'
+        """))
+        if result.fetchone()[0] == 0:
+            logging.error("Staging tables not created! Please run create_staging_tables task first.")
+            raise RuntimeError("Staging tables do not exist")
+        
+        # Check if availed column is INTEGER (per PHYSICALMODEL.txt) or BOOLEAN (old schema)
+        result = conn.execute(text("""
+            SELECT data_type 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = 'stg_marketing_department_transactional_campaign_data'
+            AND column_name = 'availed'
+        """))
+        row = result.fetchone()
+        if row and row[0].upper() != 'INTEGER':
+            logging.warning(f"WARNING: stg_marketing_department_transactional_campaign_data.availed is {row[0]}, but should be INTEGER per PHYSICALMODEL.txt")
+            logging.warning("Please drop and recreate staging tables using sql/00_create_staging_tables.sql")
+
+def _format_dataframe_for_staging(df, table_name):
+    """Format DataFrame data to match staging table data types before insertion"""
+    if df is None or df.empty:
+        return df
+    
+    df = df.copy()
+    
+    # Format based on table name
+    if table_name == 'stg_marketing_department_campaign_data':
+        # Drop transaction_date if it exists (not in staging table schema)
+        if 'transaction_date' in df.columns:
+            df = df.drop(columns=['transaction_date'], errors='ignore')
+        if 'discount' in df.columns:
+            df['discount'] = df['discount'].apply(parse_discount)
+        if 'campaign_name' in df.columns:
+            df['campaign_name'] = df['campaign_name'].apply(lambda x: format_campaign_name(clean_value(x)))
+        if 'campaign_description' in df.columns:
+            df['campaign_description'] = df['campaign_description'].apply(lambda x: format_campaign_description(clean_value(x)))
+    
+    elif table_name == 'stg_marketing_department_transactional_campaign_data':
+        if 'availed' in df.columns:
+            def convert_availed(val):
+                if pd.isna(val) or val is None:
+                    return None
+                if isinstance(val, (int, float)):
+                    return int(val)
+                str_val = str(val).strip().lower()
+                if str_val in ('1', 'true', 'yes'):
+                    return 1
+                return 0
+            df['availed'] = df['availed'].apply(convert_availed)
+    
+    elif table_name == 'stg_operations_department_order_data':
+        if 'transaction_date' in df.columns:
+            df['transaction_date'] = pd.to_datetime(df['transaction_date'], errors='coerce').dt.date
+        if 'total_amount' in df.columns:
+            df['total_amount'] = pd.to_numeric(df['total_amount'], errors='coerce')
+        if 'estimated_arrival_days' in df.columns:
+            df['estimated_arrival_days'] = df['estimated_arrival_days'].apply(extract_numeric)
+        elif 'estimated_arrival' in df.columns:
+            df['estimated_arrival_days'] = df['estimated_arrival'].apply(extract_numeric)
+            if 'estimated_arrival_days' in df.columns:
+                df = df.drop(columns=['estimated_arrival'], errors='ignore')
+    
+    elif table_name == 'stg_operations_department_line_item_data_prices':
+        if 'quantity' in df.columns:
+            df['quantity'] = df['quantity'].apply(extract_numeric)
+        if 'discount' in df.columns:
+            df['discount'] = df['discount'].apply(parse_discount)
+        if 'price' in df.columns:
+            df['price'] = pd.to_numeric(df['price'], errors='coerce')
+    
+    elif table_name == 'stg_operations_department_line_item_data_products':
+        # Per PHYSICALMODEL.txt: fact_line_items requires product_sk, which comes from product_id
+        # Ensure product_id is properly formatted and present
+        if 'product_id' in df.columns:
+            # Clean and format product_id (should be VARCHAR(50) per staging schema)
+            df['product_id'] = df['product_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        elif 'product' in df.columns:
+            # Handle potential column name variation
+            df['product_id'] = df['product'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+            df = df.drop(columns=['product'], errors='ignore')
+        
+        # Ensure order_id is properly formatted
+        if 'order_id' in df.columns:
+            df['order_id'] = df['order_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        
+        # Ensure line_item_id is properly formatted
+        # Note: line_item_id may not be in source files - it will be obtained from prices table during fact loading
+        # But staging table requires it, so generate a placeholder if missing
+        if 'line_item_id' in df.columns:
+            df['line_item_id'] = df['line_item_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        else:
+            # Generate synthetic line_item_id based on index (will be replaced during fact loading merge with prices)
+            logging.debug(f"line_item_id not found in source, generating placeholder values")
+            df['line_item_id'] = df.index.astype(str)
+        
+        # Log warning if product_id is missing (critical for fact_line_items per PHYSICALMODEL.txt)
+        if 'product_id' not in df.columns or df['product_id'].isna().all():
+            logging.warning(f"WARNING: product_id is missing or all NULL in {table_name}. This will cause fact_line_items loading to fail per PHYSICALMODEL.txt requirement.")
+        else:
+            null_count = df['product_id'].isna().sum()
+            if null_count > 0:
+                logging.warning(f"WARNING: {null_count} rows have NULL product_id in {table_name}. These will be skipped during fact_line_items loading.")
+            else:
+                logging.info(f"All {len(df)} rows have product_id populated in {table_name}")
+    
+    elif table_name == 'stg_operations_department_order_delays':
+        if 'delay_days' in df.columns:
+            df['delay_days'] = df['delay_days'].apply(extract_numeric)
+        elif 'delay_in_days' in df.columns:
+            df['delay_days'] = df['delay_in_days'].apply(extract_numeric)
+            if 'delay_days' in df.columns:
+                df = df.drop(columns=['delay_in_days'], errors='ignore')
+    
+    elif table_name == 'stg_business_department_product_list':
+        if 'price' in df.columns:
+            df['price'] = pd.to_numeric(df['price'], errors='coerce')
+        if 'product_type' in df.columns:
+            df['product_type'] = df['product_type'].apply(format_product_type)
+        if 'product_name' in df.columns:
+            df['product_name'] = df['product_name'].apply(lambda x: format_product_name(clean_value(x)))
+    
+    elif table_name == 'stg_customer_management_department_user_data':
+        if 'birthdate' in df.columns:
+            df['birthdate'] = pd.to_datetime(df['birthdate'], errors='coerce').dt.date
+        if 'creation_date' in df.columns:
+            df['creation_date'] = pd.to_datetime(df['creation_date'], errors='coerce')
+        if 'name' in df.columns:
+            df['name'] = df['name'].apply(lambda x: format_name(clean_value(x)))
+        if 'street' in df.columns:
+            df['street'] = df['street'].apply(lambda x: format_address(clean_value(x), 'street'))
+        if 'gender' in df.columns:
+            df['gender'] = df['gender'].apply(format_gender)
+        if 'user_type' in df.columns:
+            df['user_type'] = df['user_type'].apply(format_user_type)
+    
+    elif table_name == 'stg_customer_management_department_user_job':
+        if 'job_title' in df.columns:
+            df['job_title'] = df['job_title'].apply(lambda x: format_job_title(clean_value(x)))
+        if 'job_level' in df.columns:
+            # Clean [null] strings and actual NULL values
+            def clean_job_level(val):
+                if pd.isna(val) or val is None:
+                    return None
+                val_str = str(val).strip()
+                if val_str.lower() in ['[null]', 'null', 'none', '']:
+                    return None
+                return format_job_level(val_str)
+            df['job_level'] = df['job_level'].apply(clean_job_level)
+    
+    elif table_name == 'stg_customer_management_department_user_credit_card':
+        if 'name' in df.columns:
+            df['name'] = df['name'].apply(lambda x: format_name(clean_value(x)))
+        if 'credit_card_number' in df.columns:
+            df['credit_card_number'] = df['credit_card_number'].apply(lambda x: format_credit_card_number(clean_value(x)))
+        if 'issuing_bank' in df.columns:
+            df['issuing_bank'] = df['issuing_bank'].apply(lambda x: format_issuing_bank(clean_value(x)))
+    
+    elif table_name == 'stg_enterprise_department_merchant_data':
+        if 'name' in df.columns:
+            df['name'] = df['name'].apply(lambda x: format_name(clean_value(x)))
+        if 'street' in df.columns:
+            df['street'] = df['street'].apply(lambda x: format_address(clean_value(x), 'street'))
+        if 'contact_number' in df.columns:
+            df['contact_number'] = df['contact_number'].apply(lambda x: format_phone_number(clean_value(x)))
+        if 'creation_date' in df.columns:
+            df['creation_date'] = pd.to_datetime(df['creation_date'], errors='coerce')
+    
+    elif table_name == 'stg_enterprise_department_staff_data':
+        if 'name' in df.columns:
+            df['name'] = df['name'].apply(lambda x: format_name(clean_value(x)))
+        if 'street' in df.columns:
+            df['street'] = df['street'].apply(lambda x: format_address(clean_value(x), 'street'))
+        if 'contact_number' in df.columns:
+            df['contact_number'] = df['contact_number'].apply(lambda x: format_phone_number(clean_value(x)))
+        if 'creation_date' in df.columns:
+            df['creation_date'] = pd.to_datetime(df['creation_date'], errors='coerce')
+    
+    elif table_name == 'stg_enterprise_department_order_with_merchant_data':
+        # Per PHYSICALMODEL.txt: fact_orders requires staff_sk, which comes from staff_id
+        # Ensure staff_id is properly formatted and present
+        if 'staff_id' in df.columns:
+            # Clean and format staff_id (should be VARCHAR(50) per staging schema)
+            df['staff_id'] = df['staff_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        elif 'staff' in df.columns:
+            # Handle potential column name variation
+            df['staff_id'] = df['staff'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+            df = df.drop(columns=['staff'], errors='ignore')
+        
+        # Ensure merchant_id is properly formatted
+        if 'merchant_id' in df.columns:
+            df['merchant_id'] = df['merchant_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        
+        # Ensure order_id is properly formatted
+        if 'order_id' in df.columns:
+            df['order_id'] = df['order_id'].apply(lambda x: str(clean_value(x)) if pd.notna(x) else None)
+        
+        # Log warning if staff_id is missing (critical for fact_orders per PHYSICALMODEL.txt)
+        if 'staff_id' not in df.columns or df['staff_id'].isna().all():
+            logging.warning(f"WARNING: staff_id is missing or all NULL in {table_name}. This will cause fact_orders loading to fail per PHYSICALMODEL.txt requirement.")
+        else:
+            null_count = df['staff_id'].isna().sum()
+            if null_count > 0:
+                logging.warning(f"WARNING: {null_count} rows have NULL staff_id in {table_name}. These will be skipped during fact_orders loading.")
+            else:
+                logging.info(f"All {len(df)} rows have staff_id populated in {table_name}")
+    
+    # Filter columns to match staging table schema
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT column_name, data_type
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = :table_name
+            AND column_name NOT IN ('file_source', 'loaded_at')
+        """), {'table_name': table_name})
+        staging_info = {row[0]: row[1] for row in result}
+        staging_columns = list(staging_info.keys())
+    
+    # Filter DataFrame to only include columns that exist in staging table
+    available_columns = [col for col in df.columns if col in staging_columns]
+    
+    if not available_columns:
+        logging.warning(f"No matching columns found for {table_name}. Available: {list(df.columns)}, Expected: {staging_columns}")
+        return None
+    
+    # Select only matching columns
+    filtered_df = df[available_columns].copy()
+    
+    # Explicitly remove transaction_date if it somehow still exists (shouldn't be in staging table)
+    if 'transaction_date' in filtered_df.columns and 'transaction_date' not in staging_columns:
+        filtered_df = filtered_df.drop(columns=['transaction_date'], errors='ignore')
+        logging.debug(f"Removed transaction_date column from {table_name} (not in staging schema)")
+    
+    # Handle data type mismatches - convert data to match actual database schema
+    # This is a workaround if staging tables have old schema
+    # Note: Data should be formatted per PHYSICALMODEL.txt, but we handle mismatches here
+    for col in filtered_df.columns:
+        if col in staging_info:
+            db_type = staging_info[col].upper()
+            if db_type == 'BOOLEAN' and col == 'availed':
+                # Convert integer to boolean if table has boolean type (old schema)
+                logging.warning(f"Converting {col} from INTEGER to BOOLEAN to match database schema. Table should be recreated with INTEGER type per PHYSICALMODEL.txt")
+                filtered_df[col] = filtered_df[col].apply(lambda x: bool(x) if pd.notna(x) else None)
+            elif db_type in ('INTEGER', 'BIGINT', 'SMALLINT') and filtered_df[col].dtype == 'object':
+                # Convert string to numeric for integer columns
+                filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce').astype('Int64')
+    
+    # Log any dropped columns
+    dropped_columns = [col for col in df.columns if col not in staging_columns and col not in ['file_source', 'loaded_at']]
+    if dropped_columns:
+        logging.info(f"Dropped columns not in staging table {table_name}: {dropped_columns}")
+    
+    # Final validation: ensure no unexpected columns
+    final_columns = [col for col in filtered_df.columns if col not in staging_columns and col not in ['file_source', 'loaded_at']]
+    if final_columns:
+        logging.warning(f"WARNING: {table_name} still has unexpected columns after filtering: {final_columns}. These will cause insertion errors.")
+        filtered_df = filtered_df[[col for col in filtered_df.columns if col in staging_columns or col in ['file_source', 'loaded_at']]]
+    
+    return filtered_df
+
+def ingest_marketing_department():
+    """Ingest Marketing Department data into staging tables"""
+    _check_staging_tables()
+    logging.info("=" * 60)
+    logging.info("INGESTING: Marketing Department")
+    if FORCE_FULL_RELOAD:
+        logging.info("FORCE_FULL_RELOAD enabled - will process all files")
+    logging.info("=" * 60)
+    
+    # Get processed files for tracking
+    processed_campaign = _get_processed_files('stg_marketing_department_campaign_data')
+    processed_transactional = _get_processed_files('stg_marketing_department_transactional_campaign_data')
+    
+    # Campaign data
+    campaign_files = find_files("*campaign_data*", DATA_DIR)
+    # Filter out transactional files
+    campaign_files = [f for f in campaign_files if 'transactional' not in str(f).lower()]
+    
+    processed_count = 0
+    skipped_count = 0
+    for file_path in campaign_files:
+        should_process, reason = _should_process_file(file_path, 'stg_marketing_department_campaign_data', processed_campaign)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading campaign data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            # Format and filter data for staging table
+            df = _format_dataframe_for_staging(df, 'stg_marketing_department_campaign_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                # Insert into staging table
+                df.to_sql('stg_marketing_department_campaign_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_marketing_department_campaign_data")
+                processed_count += 1
+    
+    logging.info(f"Campaign data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # Transactional campaign data
+    transactional_files = find_files("*transactional_campaign_data*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in transactional_files:
+        should_process, reason = _should_process_file(file_path, 'stg_marketing_department_transactional_campaign_data', processed_transactional)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading transactional campaign data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_marketing_department_transactional_campaign_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_marketing_department_transactional_campaign_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_marketing_department_transactional_campaign_data")
+                processed_count += 1
+    
+    logging.info(f"Transactional campaign data: {processed_count} files processed, {skipped_count} files skipped")
+
+def ingest_operations_department():
+    """Ingest Operations Department data into staging tables"""
+    _check_staging_tables()
+    logging.info("=" * 60)
+    logging.info("INGESTING: Operations Department")
+    if FORCE_FULL_RELOAD:
+        logging.info("FORCE_FULL_RELOAD enabled - will process all files")
+    logging.info("=" * 60)
+    
+    # Get processed files for tracking
+    processed_orders = _get_processed_files('stg_operations_department_order_data')
+    processed_prices = _get_processed_files('stg_operations_department_line_item_data_prices')
+    processed_products = _get_processed_files('stg_operations_department_line_item_data_products')
+    processed_delays = _get_processed_files('stg_operations_department_order_delays')
+    
+    # Order data
+    order_files = find_files("*order_data*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in order_files:
+        should_process, reason = _should_process_file(file_path, 'stg_operations_department_order_data', processed_orders)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading order data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_operations_department_order_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_operations_department_order_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_operations_department_order_data")
+                processed_count += 1
+    
+    logging.info(f"Order data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # Line item prices
+    prices_files = find_files("*line_item_data_prices*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in prices_files:
+        should_process, reason = _should_process_file(file_path, 'stg_operations_department_line_item_data_prices', processed_prices)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading line item prices from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_operations_department_line_item_data_prices')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_operations_department_line_item_data_prices', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_operations_department_line_item_data_prices")
+                processed_count += 1
+    
+    logging.info(f"Line item prices: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # Line item products
+    # Per PHYSICALMODEL.txt: fact_line_items requires product_sk, which comes from product_id in this table
+    products_files = find_files("*line_item_data_products*", DATA_DIR)
+    total_loaded = 0
+    processed_count = 0
+    skipped_count = 0
+    for file_path in products_files:
+        should_process, reason = _should_process_file(file_path, 'stg_operations_department_line_item_data_products', processed_products)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading line item products from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            # Log source columns for debugging
+            logging.debug(f"  Source columns: {list(df.columns)}")
+            df = _format_dataframe_for_staging(df, 'stg_operations_department_line_item_data_products')
+            if df is not None and not df.empty:
+                # line_item_id may not be in source files - it will come from prices table during fact loading
+                # Only validate order_id and product_id which are essential
+                required_cols = ['order_id', 'product_id']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    logging.error(f"  ERROR: Missing required columns {missing_cols} in {file_path}. Required per PHYSICALMODEL.txt for fact_line_items.")
+                else:
+                    # If line_item_id is missing, log a warning but don't fail
+                    if 'line_item_id' not in df.columns:
+                        logging.warning(f"  WARNING: line_item_id not found in {file_path}. It will be obtained from line_item_data_prices during fact loading.")
+                    # Check for NULL product_id values
+                    null_product_count = df['product_id'].isna().sum() if 'product_id' in df.columns else len(df)
+                    if null_product_count > 0:
+                        logging.warning(f"  WARNING: {null_product_count} rows have NULL product_id (will be skipped in fact_line_items)")
+                    
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_operations_department_line_item_data_products', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                total_loaded += len(df)
+                logging.info(f"  Loaded {len(df)} rows into stg_operations_department_line_item_data_products")
+                logging.info(f"  Columns: {list(df.columns)}")
+                processed_count += 1
+    
+    logging.info(f"Line item products: {processed_count} files processed, {skipped_count} files skipped")
+    if total_loaded > 0:
+        logging.info(f"Total loaded: {total_loaded} line item product records (product_id required per PHYSICALMODEL.txt)")
+    
+    # Order delays
+    delays_files = find_files("*order_delays*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in delays_files:
+        should_process, reason = _should_process_file(file_path, 'stg_operations_department_order_delays', processed_delays)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading order delays from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_operations_department_order_delays')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_operations_department_order_delays', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_operations_department_order_delays")
+                processed_count += 1
+    
+    logging.info(f"Order delays: {processed_count} files processed, {skipped_count} files skipped")
+
+def ingest_business_department():
+    """Ingest Business Department data into staging tables"""
+    _check_staging_tables()
+    logging.info("=" * 60)
+    logging.info("INGESTING: Business Department")
+    if FORCE_FULL_RELOAD:
+        logging.info("FORCE_FULL_RELOAD enabled - will process all files")
+    logging.info("=" * 60)
+    
+    # Get processed files for tracking
+    processed_products = _get_processed_files('stg_business_department_product_list')
+    
+    # Product list
+    product_files = find_files("*product_list*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in product_files:
+        should_process, reason = _should_process_file(file_path, 'stg_business_department_product_list', processed_products)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading product list from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_business_department_product_list')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_business_department_product_list', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_business_department_product_list")
+                processed_count += 1
+    
+    logging.info(f"Product list: {processed_count} files processed, {skipped_count} files skipped")
+
+def ingest_customer_management_department():
+    """Ingest Customer Management Department data into staging tables"""
+    _check_staging_tables()
+    logging.info("=" * 60)
+    logging.info("INGESTING: Customer Management Department")
+    if FORCE_FULL_RELOAD:
+        logging.info("FORCE_FULL_RELOAD enabled - will process all files")
+    logging.info("=" * 60)
+    
+    # Get processed files for tracking
+    processed_users = _get_processed_files('stg_customer_management_department_user_data')
+    processed_jobs = _get_processed_files('stg_customer_management_department_user_job')
+    processed_credit_cards = _get_processed_files('stg_customer_management_department_user_credit_card')
+    
+    # User data
+    user_files = find_files("*user_data*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in user_files:
+        should_process, reason = _should_process_file(file_path, 'stg_customer_management_department_user_data', processed_users)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading user data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_customer_management_department_user_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_customer_management_department_user_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_customer_management_department_user_data")
+                processed_count += 1
+    
+    logging.info(f"User data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # User job data
+    user_job_files = find_files("*user_job*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in user_job_files:
+        should_process, reason = _should_process_file(file_path, 'stg_customer_management_department_user_job', processed_jobs)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading user job data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_customer_management_department_user_job')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_customer_management_department_user_job', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_customer_management_department_user_job")
+                processed_count += 1
+    
+    logging.info(f"User job data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # User credit card data
+    credit_card_files = find_files("*user_credit_card*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in credit_card_files:
+        should_process, reason = _should_process_file(file_path, 'stg_customer_management_department_user_credit_card', processed_credit_cards)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading user credit card data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            # Log source columns for debugging
+            logging.debug(f"  Source columns: {list(df.columns)}")
+            df = _format_dataframe_for_staging(df, 'stg_customer_management_department_user_credit_card')
+            if df is not None and not df.empty:
+                # Validate name column is present
+                if 'name' not in df.columns:
+                    logging.warning(f"  WARNING: 'name' column missing in {file_path}. This will cause dim_credit_card.name to be NULL.")
+                else:
+                    null_name_count = df['name'].isna().sum()
+                    if null_name_count > 0:
+                        logging.warning(f"  WARNING: {null_name_count} rows have NULL name in {file_path}")
+                    else:
+                        logging.info(f"  All {len(df)} rows have name populated")
+                
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_customer_management_department_user_credit_card', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_customer_management_department_user_credit_card")
+                logging.info(f"  Columns loaded: {list(df.columns)}")
+                processed_count += 1
+    
+    logging.info(f"User credit card data: {processed_count} files processed, {skipped_count} files skipped")
+
+def ingest_enterprise_department():
+    """Ingest Enterprise Department data into staging tables"""
+    _check_staging_tables()
+    logging.info("=" * 60)
+    logging.info("INGESTING: Enterprise Department")
+    if FORCE_FULL_RELOAD:
+        logging.info("FORCE_FULL_RELOAD enabled - will process all files")
+    logging.info("=" * 60)
+    
+    # Get processed files for tracking
+    processed_merchants = _get_processed_files('stg_enterprise_department_merchant_data')
+    processed_staff = _get_processed_files('stg_enterprise_department_staff_data')
+    processed_order_merchant = _get_processed_files('stg_enterprise_department_order_with_merchant_data')
+    
+    # Merchant data
+    merchant_files = find_files("*merchant_data*", DATA_DIR)
+    # Exclude order_with_merchant_data files (they only have merchant_id)
+    merchant_files = [f for f in merchant_files if 'order_with_merchant_data' not in str(f)]
+    processed_count = 0
+    skipped_count = 0
+    for file_path in merchant_files:
+        should_process, reason = _should_process_file(file_path, 'stg_enterprise_department_merchant_data', processed_merchants)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading merchant data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_enterprise_department_merchant_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_enterprise_department_merchant_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_enterprise_department_merchant_data")
+                processed_count += 1
+    
+    logging.info(f"Merchant data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # Staff data
+    staff_files = find_files("*staff_data*", DATA_DIR)
+    processed_count = 0
+    skipped_count = 0
+    for file_path in staff_files:
+        should_process, reason = _should_process_file(file_path, 'stg_enterprise_department_staff_data', processed_staff)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading staff data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            df = _format_dataframe_for_staging(df, 'stg_enterprise_department_staff_data')
+            if df is not None and not df.empty:
+                df['file_source'] = str(file_path)
+                df.to_sql('stg_enterprise_department_staff_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                logging.info(f"  Loaded {len(df)} rows into stg_enterprise_department_staff_data")
+                processed_count += 1
+    
+    logging.info(f"Staff data: {processed_count} files processed, {skipped_count} files skipped")
+    
+    # Order with merchant data
+    # Per PHYSICALMODEL.txt: fact_orders requires staff_sk, which comes from staff_id in this table
+    order_merchant_files = find_files("*order_with_merchant_data*", DATA_DIR)
+    total_loaded = 0
+    processed_count = 0
+    skipped_count = 0
+    for file_path in order_merchant_files:
+        should_process, reason = _should_process_file(file_path, 'stg_enterprise_department_order_with_merchant_data', processed_order_merchant)
+        
+        if not should_process:
+            logging.info(f"Skipping {file_path}: {reason}")
+            skipped_count += 1
+            continue
+        
+        logging.info(f"Loading order with merchant data from: {file_path} ({reason})")
+        df = load_file(file_path, clean=True)
+        if df is not None and not df.empty:
+            # Log source columns for debugging
+            logging.debug(f"  Source columns: {list(df.columns)}")
+            df = _format_dataframe_for_staging(df, 'stg_enterprise_department_order_with_merchant_data')
+            if df is not None and not df.empty:
+                # Validate required columns per PHYSICALMODEL.txt
+                required_cols = ['order_id', 'merchant_id', 'staff_id']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    logging.error(f"  ERROR: Missing required columns {missing_cols} in {file_path}. Required per PHYSICALMODEL.txt for fact_orders.")
+                else:
+                    # Check for NULL staff_id values
+                    null_staff_count = df['staff_id'].isna().sum() if 'staff_id' in df.columns else len(df)
+                    if null_staff_count > 0:
+                        logging.warning(f"  WARNING: {null_staff_count} rows have NULL staff_id (will be skipped in fact_orders)")
+                    
+                    df['file_source'] = str(file_path)
+                    df.to_sql('stg_enterprise_department_order_with_merchant_data', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+                    total_loaded += len(df)
+                    logging.info(f"  Loaded {len(df)} rows into stg_enterprise_department_order_with_merchant_data")
+                    logging.info(f"  Columns: {list(df.columns)}")
+                    processed_count += 1
+    
+    logging.info(f"Order with merchant data: {processed_count} files processed, {skipped_count} files skipped")
+    if total_loaded > 0:
+        logging.info(f"Total loaded: {total_loaded} order-merchant records (staff_id required per PHYSICALMODEL.txt)")
 
 def main():
-    data_root = Path(DATA_DIR)
-    if not data_root.exists():
-        logging.error("DATA_DIR does not exist: %s", DATA_DIR)
-        sys.exit(1)
-
-    # Exclude staging_parquet directory (output directory, not source)
-    # This directory may not exist if it was deleted - that's fine, we'll skip it
-    exclude_dirs = {"staging_parquet"}
+    """Main ingestion function - loads all departments"""
+    logging.info("=" * 60)
+    logging.info("STARTING DATA INGESTION")
+    logging.info("=" * 60)
     
-    # walk files, excluding output directories
-    # Use os.walk for better error handling with deleted directories
-    file_count = 0
-    skipped_count = 0
+    # Check if staging tables exist
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = 'stg_marketing_department_campaign_data'
+        """))
+        if result.fetchone()[0] == 0:
+            logging.error("Staging tables not created! Please run create_staging_tables task first.")
+            return
     
-    try:
-        for root, dirs, files in os.walk(data_root):
-            # Remove excluded directories from dirs list to prevent scanning them
-            # This prevents os.walk from descending into excluded directories
-            # If directory doesn't exist, it won't be in dirs list anyway
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
-            
-            for file in files:
-                file_path = Path(root) / file
-                try:
-                    # Skip files in excluded directories - check path string (safety check)
-                    path_str = str(file_path)
-                    if any(excluded in path_str for excluded in exclude_dirs):
-                        logging.debug("Skipping file in excluded directory: %s", file_path)
-                        skipped_count += 1
-                        continue
-                    
-                    if file_path.is_file():
-                        file_count += 1
-                        process_file(file_path)
-                except (FileNotFoundError, PermissionError, OSError) as e:
-                    # Skip files that can't be accessed (e.g., deleted during scan)
-                    logging.debug("Skipping inaccessible file %s: %s", file_path, e)
-                    continue
-    except (FileNotFoundError, PermissionError, OSError) as e:
-        # Handle case where a directory was deleted during or before scanning
-        # This is normal if staging_parquet was deleted - os.walk will skip it automatically
-        logging.debug("Directory access error (may be from deleted staging_parquet): %s", e)
-        logging.info("Continuing with files that were successfully processed...")
+    # Ingest per department
+    ingest_marketing_department()
+    ingest_operations_department()
+    ingest_business_department()
+    ingest_customer_management_department()
+    ingest_enterprise_department()
     
-    if skipped_count > 0:
-        logging.info("Skipped %d files from excluded directories", skipped_count)
-
-    logging.info("Processed %d files from %s", file_count, DATA_DIR)
+    logging.info("=" * 60)
+    logging.info("DATA INGESTION COMPLETE!")
+    logging.info("=" * 60)
 
 if __name__ == "__main__":
     main()

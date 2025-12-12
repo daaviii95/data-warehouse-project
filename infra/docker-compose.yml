@@ -74,8 +74,16 @@ services:
       bash -c "
         set -e
         echo '[INIT] Starting Airflow initialization...'
-        airflow db migrate 2>&1 | grep -v 'INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
-        echo '[INIT] Database migration completed'
+        echo '[INIT] Checking database state...'
+        # Check if database is already initialized by checking for log table
+        if PGPASSWORD=airflow psql -h airflow-db -U airflow -d airflow -tAc \"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'log')\" 2>/dev/null | grep -q '^t$'; then
+          echo '[INIT] Database already initialized, running upgrade...'
+          airflow db upgrade 2>&1 | grep -v 'INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
+        else
+          echo '[INIT] Database not initialized, running init...'
+          airflow db init 2>&1 | grep -v 'INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
+        fi
+        echo '[INIT] Database initialization completed'
         airflow users create --username admin --firstname Air --lastname Flow --role Admin --email admin@example.com --password admin 2>&1 | grep -v 'already exist\|INFO\|WARNING\|Created Permission\|Added Permission\|Inserted Role' || true
         echo '[INIT] Admin user check completed'
         airflow connections delete shopzada_postgres 2>&1 | grep -v 'does not exist\|INFO\|WARNING' || true

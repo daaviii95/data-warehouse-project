@@ -186,8 +186,8 @@ def execute_sql_file(sql_file_path):
         logging.error(f"Error executing SQL file {sql_file_path}: {e}")
         raise
 
-def exec_sql_03():
-    execute_sql_file('sql/03_create_analytical_views.sql')
+def exec_sql_13():
+    execute_sql_file('sql/13_create_analytical_views.sql')
 
 with DAG(
     'shopzada_analytical_views',
@@ -202,7 +202,7 @@ with DAG(
     # Task: Create/Refresh Analytical Views
     create_analytical_views = PythonOperator(
         task_id='create_analytical_views',
-        python_callable=exec_sql_03,
+        python_callable=exec_sql_13,
         doc_md="""
         ## Analytical Views Creation/Refresh
         

@@ -4,23 +4,23 @@ Kimball Methodology - Star Schema Data Warehouse
 Based on Physical Model (physicalmodel.txt)
 
 This DAG orchestrates the complete ETL pipeline:
-1. Schema Creation: Create all dimension and fact tables from physical model
-2. Date Dimension: Populate date dimension
-3. Ingestion: Load data from various sources into staging tables
-4. Dimension Loading: Transform staging data into dimension tables
-5. Fact Loading: Transform staging data into fact tables
-6. Data Quality: Validate data integrity and quality
+1. Schema: Create all dimension and fact tables from physical model
+2. Staging: Create staging tables for raw data
+3. Ingest: Load data per department into staging tables
+4. Transform: Clean and transform data from staging
+5. Load Dim: Load transformed data into dimension tables
+6. Load Fact: Load transformed data into fact tables
+7. Views: Create analytical views for BI tools
 """
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.bash import BashOperator
-from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.dates import days_ago
-from datetime import datetime, timedelta
+from datetime import timedelta
 import sys
 import os
+import logging
 
 # Add scripts directory to path
 sys.path.insert(0, '/opt/airflow/repo/scripts')
@@ -208,36 +208,197 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-def run_ingestion():
-    """Run the ingestion script - now idempotent (skips already-ingested files)"""
-    import ingest
-    # The ingestion script now checks ingestion_log to skip already-ingested files
-    ingest.main()
+# SQL execution wrapper functions
+def exec_sql_00():
+    """Create staging tables"""
+    execute_sql_file('sql/00_create_staging_tables.sql')
 
-def run_python_etl():
-    """Run Python-based ETL pipeline (similar to original SQLite scripts)"""
-    import etl_pipeline_python
-    etl_pipeline_python.main()
-
-def run_data_quality_checks():
-    """Run data quality validation checks"""
-    import data_quality
-    data_quality.run_all_checks()
-
-# SQL execution wrapper functions (needed because lambdas can't be serialized by Airflow)
 def exec_sql_01():
+    """Create schema from physical model"""
     execute_sql_file('sql/01_create_schema_from_physical_model.sql')
 
 def exec_sql_02():
+    """Populate date dimension"""
     execute_sql_file('sql/02_populate_dim_date.sql')
 
-def exec_sql_13():
-    execute_sql_file('sql/13_create_analytical_views.sql')
+def exec_sql_03():
+    """Create analytical views"""
+    execute_sql_file('sql/03_create_analytical_views.sql')
+
+# Ingestion functions
+def run_ingest_marketing():
+    """Ingest Marketing Department data into staging tables"""
+    import ingest
+    ingest.ingest_marketing_department()
+
+def run_ingest_operations():
+    """Ingest Operations Department data into staging tables"""
+    import ingest
+    ingest.ingest_operations_department()
+
+def run_ingest_business():
+    """Ingest Business Department data into staging tables"""
+    import ingest
+    ingest.ingest_business_department()
+
+def run_ingest_customer_management():
+    """Ingest Customer Management Department data into staging tables"""
+    import ingest
+    ingest.ingest_customer_management_department()
+
+def run_ingest_enterprise():
+    """Ingest Enterprise Department data into staging tables"""
+    import ingest
+    ingest.ingest_enterprise_department()
+
+# Extract function
+def run_extract():
+    """Extract data from staging tables"""
+    import extract
+    
+    logging.info("=" * 60)
+    logging.info("EXTRACTING DATA FROM STAGING")
+    logging.info("=" * 60)
+    
+    # Extract all data from staging
+    logging.info("Extracting data from staging tables...")
+    campaign_df = extract.extract_campaign_data()
+    transactional_campaign_df = extract.extract_transactional_campaign_data()
+    order_df = extract.extract_order_data()
+    line_item_prices_df = extract.extract_line_item_prices()
+    line_item_products_df = extract.extract_line_item_products()
+    order_delays_df = extract.extract_order_delays()
+    product_df = extract.extract_product_data()
+    user_df = extract.extract_user_data()
+    user_job_df = extract.extract_user_job_data()
+    user_credit_card_df = extract.extract_user_credit_card_data()
+    merchant_df = extract.extract_merchant_data()
+    staff_df = extract.extract_staff_data()
+    order_merchant_df = extract.extract_order_merchant_data()
+    
+    logging.info("=" * 60)
+    logging.info("EXTRACTION COMPLETE")
+    logging.info(f"Extracted: {len(campaign_df)} campaigns, {len(order_df)} orders, {len(product_df)} products, {len(user_df)} users")
+    logging.info("=" * 60)
+    
+    # Return success indicator (DataFrames are too large for XCom)
+    return "extraction_complete"
+
+# Transform function
+def run_transform():
+    """Transform extracted data"""
+    import extract
+    import transform
+    
+    logging.info("=" * 60)
+    logging.info("TRANSFORMING DATA")
+    logging.info("=" * 60)
+    
+    # Extract all data from staging (extract task ensures data is ready)
+    logging.info("Extracting data from staging tables...")
+    campaign_df = extract.extract_campaign_data()
+    transactional_campaign_df = extract.extract_transactional_campaign_data()
+    order_df = extract.extract_order_data()
+    line_item_prices_df = extract.extract_line_item_prices()
+    line_item_products_df = extract.extract_line_item_products()
+    order_delays_df = extract.extract_order_delays()
+    product_df = extract.extract_product_data()
+    user_df = extract.extract_user_data()
+    user_job_df = extract.extract_user_job_data()
+    user_credit_card_df = extract.extract_user_credit_card_data()
+    merchant_df = extract.extract_merchant_data()
+    staff_df = extract.extract_staff_data()
+    order_merchant_df = extract.extract_order_merchant_data()
+    
+    # Transform all data
+    logging.info("Transforming data...")
+    campaign_df = transform.transform_campaign_data(campaign_df)
+    transactional_campaign_df = transform.transform_transactional_campaign_data(transactional_campaign_df)
+    order_df = transform.transform_order_data(order_df)
+    line_item_prices_df = transform.transform_line_item_prices(line_item_prices_df)
+    line_item_products_df = transform.transform_line_item_products(line_item_products_df)
+    order_delays_df = transform.transform_order_delays(order_delays_df)
+    product_df = transform.transform_product_data(product_df)
+    user_df = transform.transform_user_data(user_df)
+    user_job_df = transform.transform_user_job_data(user_job_df)
+    user_credit_card_df = transform.transform_user_credit_card_data(user_credit_card_df)
+    merchant_df = transform.transform_merchant_data(merchant_df)
+    staff_df = transform.transform_staff_data(staff_df)
+    
+    logging.info("=" * 60)
+    logging.info("TRANSFORMATION COMPLETE")
+    logging.info("=" * 60)
+    
+    # Return success indicator (DataFrames are too large for XCom)
+    return "transformation_complete"
+
+# Load Dimensions function
+def run_load_dim():
+    """Load transformed data into dimension tables"""
+    import extract
+    import transform
+    import load_dim
+    
+    logging.info("=" * 60)
+    logging.info("LOADING DIMENSIONS")
+    logging.info("=" * 60)
+    
+    # Extract and transform data (transform task ensures data is ready)
+    logging.info("Extracting and transforming data for dimensions...")
+    campaign_df = transform.transform_campaign_data(extract.extract_campaign_data())
+    product_df = transform.transform_product_data(extract.extract_product_data())
+    user_df = transform.transform_user_data(extract.extract_user_data())
+    staff_df = transform.transform_staff_data(extract.extract_staff_data())
+    merchant_df = transform.transform_merchant_data(extract.extract_merchant_data())
+    user_job_df = transform.transform_user_job_data(extract.extract_user_job_data())
+    user_credit_card_df = transform.transform_user_credit_card_data(extract.extract_user_credit_card_data())
+    
+    # Load dimensions
+    load_dim.load_dim_campaign(campaign_df)
+    load_dim.load_dim_product(product_df)
+    load_dim.load_dim_user(user_df)
+    load_dim.load_dim_staff(staff_df)
+    load_dim.load_dim_merchant(merchant_df)
+    load_dim.load_dim_user_job(user_job_df)
+    load_dim.load_dim_credit_card(user_credit_card_df)
+    
+    logging.info("=" * 60)
+    logging.info("DIMENSIONS LOADED SUCCESSFULLY")
+    logging.info("=" * 60)
+
+# Load Facts function
+def run_load_fact():
+    """Load transformed data into fact tables"""
+    import extract
+    import transform
+    import load_fact
+    
+    logging.info("=" * 60)
+    logging.info("LOADING FACTS")
+    logging.info("=" * 60)
+    
+    # Extract and transform data (transform task ensures data is ready)
+    logging.info("Extracting and transforming data for facts...")
+    order_df = transform.transform_order_data(extract.extract_order_data())
+    line_item_prices_df = transform.transform_line_item_prices(extract.extract_line_item_prices())
+    line_item_products_df = transform.transform_line_item_products(extract.extract_line_item_products())
+    order_delays_df = transform.transform_order_delays(extract.extract_order_delays())
+    transactional_campaign_df = transform.transform_transactional_campaign_data(extract.extract_transactional_campaign_data())
+    order_merchant_df = extract.extract_order_merchant_data()
+    
+    # Load facts
+    load_fact.load_fact_orders(order_df, order_merchant_df, order_delays_df)
+    load_fact.load_fact_line_items(line_item_prices_df, line_item_products_df)
+    load_fact.load_fact_campaign_transactions(transactional_campaign_df)
+    
+    logging.info("=" * 60)
+    logging.info("FACTS LOADED SUCCESSFULLY")
+    logging.info("=" * 60)
 
 with DAG(
     'shopzada_etl_pipeline',
     default_args=default_args,
-    description='ShopZada Complete ETL Pipeline - Kimball Star Schema (Physical Model)',
+    description='ShopZada Complete ETL Pipeline - Schema -> Staging -> Ingest -> Transform -> Load Dim -> Load Fact -> Views',
     schedule_interval='@daily',
     start_date=days_ago(1),
     catchup=False,
@@ -258,7 +419,19 @@ with DAG(
         """
     )
 
-    # Task 2: Populate Date Dimension (must be done before fact tables)
+    # Task 2: Create Staging Tables
+    create_staging_tables = PythonOperator(
+        task_id='create_staging_tables',
+        python_callable=exec_sql_00,
+        doc_md="""
+        ## Staging Tables Creation
+        
+        Creates staging tables for each department to store raw data before transformation.
+        Staging tables follow naming convention: stg_{department}_{data_type}
+        """
+    )
+
+    # Task 3: Populate Date Dimension (must be done before fact tables)
     populate_date_dimension = PythonOperator(
         task_id='populate_date_dimension',
         python_callable=exec_sql_02,
@@ -270,58 +443,175 @@ with DAG(
         """
     )
 
-    # Task 3: Python-based ETL (similar to original SQLite scripts)
-    # This directly loads from data files into dimensions and facts
-    python_etl = PythonOperator(
-        task_id='run_python_etl',
-        python_callable=run_python_etl,
+    # Task 4: Ingest Data Per Department -> Staging (Parallel Execution)
+    ingest_marketing = PythonOperator(
+        task_id='ingest_marketing_department',
+        python_callable=run_ingest_marketing,
         doc_md="""
-        ## Python-based ETL Pipeline
+        ## Marketing Department Ingestion
         
-        Similar to original SQLite scripts - directly reads data files and loads into PostgreSQL.
-        - Reads from /opt/airflow/data directory
-        - Merges data using pandas (like original scripts)
-        - Loads directly into dimension and fact tables
-        - Handles all file formats: CSV, Parquet, JSON, Excel, Pickle, HTML
+        Ingests Marketing Department data into staging tables:
+        - Campaign data (campaign_data.csv)
+        - Transactional campaign data (transactional_campaign_data.csv)
         """
     )
 
-    # Task 7: Data Quality Checks
-    data_quality_checks = PythonOperator(
-        task_id='run_data_quality_checks',
-        python_callable=run_data_quality_checks,
+    ingest_operations = PythonOperator(
+        task_id='ingest_operations_department',
+        python_callable=run_ingest_operations,
         doc_md="""
-        ## Data Quality Validation
+        ## Operations Department Ingestion
         
-        Runs comprehensive data quality checks:
-        - Referential integrity
-        - Null value checks
-        - Duplicate detection
-        - Data type validation
+        Ingests Operations Department data into staging tables:
+        - Order data (order_data_*.parquet, *.pickle, *.csv, *.xlsx, *.json, *.html)
+        - Line item prices (line_item_data_prices*.csv, *.parquet)
+        - Line item products (line_item_data_products*.csv, *.parquet)
+        - Order delays (order_delays.html)
         """
     )
 
-    # Note: Analytical Views are now in a separate DAG (shopzada_analytical_views)
-    # This allows refreshing views without re-running the entire ETL pipeline
-    # Run 'shopzada_analytical_views' DAG independently when needed
+    ingest_business = PythonOperator(
+        task_id='ingest_business_department',
+        python_callable=run_ingest_business,
+        doc_md="""
+        ## Business Department Ingestion
+        
+        Ingests Business Department data into staging tables:
+        - Product list (product_list.xlsx)
+        """
+    )
 
-    # Define task dependencies (Kimball ETL flow)
-    # Option 1: Python-based ETL (similar to original SQLite scripts)
-    # Step 1: Create schema first
-    create_schema >> populate_date_dimension
+    ingest_customer_management = PythonOperator(
+        task_id='ingest_customer_management_department',
+        python_callable=run_ingest_customer_management,
+        doc_md="""
+        ## Customer Management Department Ingestion
+        
+        Ingests Customer Management Department data into staging tables:
+        - User data (user_data.json)
+        - User jobs (user_job.csv)
+        - User credit cards (user_credit_card.pickle)
+        """
+    )
+
+    ingest_enterprise = PythonOperator(
+        task_id='ingest_enterprise_department',
+        python_callable=run_ingest_enterprise,
+        doc_md="""
+        ## Enterprise Department Ingestion
+        
+        Ingests Enterprise Department data into staging tables:
+        - Merchant data (merchant_data.html)
+        - Staff data (staff_data.html)
+        - Order with merchant data (order_with_merchant_data*.parquet, *.csv)
+        """
+    )
+
+    # Task 5: Extract
+    extract = PythonOperator(
+        task_id='extract',
+        python_callable=run_extract,
+        doc_md="""
+        ## Extract Data
+        
+        Extracts data from staging tables into pandas DataFrames:
+        - Campaign data
+        - Transactional campaign data
+        - Order data
+        - Line item data
+        - Product data
+        - User data
+        - Merchant data
+        - Staff data
+        """
+    )
+
+    # Task 6: Transform
+    transform = PythonOperator(
+        task_id='transform',
+        python_callable=run_transform,
+        doc_md="""
+        ## Transform Data
+        
+        Applies transformations to extracted data:
+        - Data cleaning (remove nulls, format strings)
+        - Normalization (product types, discounts, etc.)
+        - Formatting (names, addresses, phone numbers)
+        - Data type conversions
+        """
+    )
+
+    # Task 7: Load Dimensions
+    load_dim = PythonOperator(
+        task_id='load_dim',
+        python_callable=run_load_dim,
+        doc_md="""
+        ## Load Dimensions
+        
+        Loads transformed data into dimension tables:
+        - dim_campaign
+        - dim_product
+        - dim_user
+        - dim_staff
+        - dim_merchant
+        - dim_user_job
+        - dim_credit_card
+        """
+    )
+
+    # Task 8: Load Facts
+    load_fact = PythonOperator(
+        task_id='load_fact',
+        python_callable=run_load_fact,
+        doc_md="""
+        ## Load Facts
+        
+        Loads transformed data into fact tables with dimension key lookups:
+        - fact_orders
+        - fact_line_items
+        - fact_campaign_transactions
+        """
+    )
+
+    # Task 9: Create Analytical Views
+    create_analytical_views = PythonOperator(
+        task_id='create_analytical_views',
+        python_callable=exec_sql_03,
+        doc_md="""
+        ## Analytical Views Creation
+        
+        Creates SQL views optimized for BI tools:
+        - vw_campaign_performance
+        - vw_merchant_performance
+        - vw_customer_segment_revenue
+        - vw_sales_by_time
+        - vw_product_performance
+        - vw_staff_performance
+        - vw_segment_revenue_by_time
+        """
+    )
+
+    # Define task dependencies: Schema -> Staging -> Ingest -> Extract -> Transform -> Load Dim -> Load Fact -> Views
+    # 1. Schema -> Staging -> Date Dimension
+    create_schema >> create_staging_tables >> populate_date_dimension
     
-    # Step 2: Run Python ETL (loads everything directly from data files)
-    populate_date_dimension >> python_etl
+    # 2. Date Dimension -> Ingest (all departments in parallel)
+    populate_date_dimension >> [
+        ingest_marketing,
+        ingest_operations,
+        ingest_business,
+        ingest_customer_management,
+        ingest_enterprise
+    ]
     
-    # Step 3: Data quality checks after Python ETL
-    python_etl >> data_quality_checks
+    # 3. All ingestion tasks -> Extract
+    [
+        ingest_marketing,
+        ingest_operations,
+        ingest_business,
+        ingest_customer_management,
+        ingest_enterprise
+    ] >> extract
     
-    # Note: Analytical views are now in a separate DAG for independent execution
-    
-    # Note: SQL-based ETL tasks (load_dim_*, load_fact_*) have been removed
-    # as they require staging tables that are not created by the Python ETL pipeline.
-    # The Python ETL pipeline loads directly from source files into dimension/fact tables.
-    # If you need SQL-based loading, you would need to:
-    # 1. Create staging tables first
-    # 2. Load data into staging tables
-    # 3. Then load from staging to dimension/fact tables
+    # 4. Extract -> Transform -> Load Dim -> Load Fact -> Views
+    extract >> transform >> load_dim >> load_fact >> create_analytical_views
