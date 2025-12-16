@@ -13,5 +13,3 @@ airflow/logs/dag_processor_manager/dag_processor_manager.log
 /airflow/logs/scheduler
 /airflow/logs/dag_processor_manager
 /airflow/logs
-*.log
-/airflow/logs/scheduler
