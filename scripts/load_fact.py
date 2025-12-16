@@ -456,7 +456,17 @@ def load_fact_orders(order_df, order_merchant_df, delays_df):
         logging.error(f"  Dates: {len(date_map)}")
         logging.error("=" * 60)
     
-    logging.info(f"Loaded {total_inserted} orders into fact_orders")
+    # Get actual count from database to verify
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM fact_orders"))
+        actual_db_count = result.fetchone()[0]
+    
+    logging.info("=" * 60)
+    logging.info("ORDERS LOADED SUCCESSFULLY")
+    logging.info("=" * 60)
+    logging.info(f"Inserted/Updated: {total_inserted:,} orders")
+    logging.info(f"Total orders in database: {actual_db_count:,}")
+    logging.info("=" * 60)
 
 def load_fact_line_items(prices_df, products_df):
     """Load fact_line_items from transformed DataFrames"""
@@ -465,6 +475,23 @@ def load_fact_line_items(prices_df, products_df):
         return
     
     logging.info("Loading fact_line_items...")
+    
+    # Check if fact_line_items already has data - if so, warn user
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM fact_line_items"))
+        existing_count = result.fetchone()[0]
+        if existing_count > 0:
+            logging.info("=" * 60)
+            logging.info("NOTICE: Database already contains data")
+            logging.info("=" * 60)
+            logging.info(f"Current rows in fact_line_items: {existing_count:,}")
+            logging.info("")
+            logging.info("If you're loading the same data again, rows will be skipped.")
+            logging.info("Only new data (that doesn't exist) will be inserted.")
+            logging.info("This prevents duplicate data in your database.")
+            logging.info("")
+            logging.info("To reload everything, run: TRUNCATE TABLE fact_line_items;")
+            logging.info("=" * 60)
     
     # Per PHYSICALMODEL.txt: fact_line_items requires product_sk, which comes from product_id
     # Validate product_id before merge
@@ -530,7 +557,8 @@ def load_fact_line_items(prices_df, products_df):
     skipped_no_product = 0
     skipped_no_order = 0
     
-    logging.info(f"Processing {total_rows} line items in chunks of {CHUNK_SIZE}...")
+    logging.info(f"Processing {total_rows:,} line items from staging tables in chunks of {CHUNK_SIZE:,}...")
+    logging.info(f"Note: Rows that already exist in fact_line_items will be skipped to prevent duplicates.")
     
     for chunk_start in range(0, total_rows, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE, total_rows)
@@ -595,12 +623,26 @@ def load_fact_line_items(prices_df, products_df):
         if fact_rows:
             logging.info(f"Inserting chunk {chunk_start//CHUNK_SIZE + 1} ({len(fact_rows)} line items, {chunk_start+1}-{chunk_end} of {total_rows})...")
             with engine.begin() as conn:
+                # Get count before insert to calculate actual inserts
+                result_before = conn.execute(text("SELECT COUNT(*) FROM fact_line_items"))
+                count_before = result_before.fetchone()[0]
+                
                 conn.execute(text("""
                     INSERT INTO fact_line_items (order_id, product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk, price, quantity)
                     VALUES (:order_id, :product_sk, :user_sk, :merchant_sk, :staff_sk, :transaction_date_sk, :price, :quantity)
                     ON CONFLICT (order_id, product_sk) DO NOTHING
                 """), fact_rows)
-            total_inserted += len(fact_rows)
+                
+                # Get count after insert to calculate actual inserts (accounts for ON CONFLICT DO NOTHING)
+                result_after = conn.execute(text("SELECT COUNT(*) FROM fact_line_items"))
+                count_after = result_after.fetchone()[0]
+                actual_inserted = count_after - count_before
+                
+                if actual_inserted < len(fact_rows):
+                    skipped_conflicts = len(fact_rows) - actual_inserted
+                    logging.info(f"  Inserted: {actual_inserted:,} new rows | Skipped: {skipped_conflicts:,} rows (already exist in database)")
+                
+            total_inserted += actual_inserted
         
         # Clear memory
         del fact_rows
@@ -624,7 +666,57 @@ def load_fact_line_items(prices_df, products_df):
         logging.error(f"  Products: {len(product_map)}")
         logging.error("=" * 60)
     
-    logging.info(f"Loaded {total_inserted} line items into fact_line_items")
+    # Get actual count from database to verify
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM fact_line_items"))
+        actual_db_count = result.fetchone()[0]
+    
+    if total_inserted == 0:
+        logging.warning("=" * 60)
+        logging.warning("NO NEW DATA INSERTED")
+        logging.warning("=" * 60)
+        logging.warning(f"Summary:")
+        logging.warning(f"  Rows processed: {total_rows:,}")
+        logging.warning(f"  New rows inserted: {total_inserted:,}")
+        logging.warning(f"  Rows skipped (already exist): {total_rows - total_inserted:,}")
+        logging.warning(f"  Total rows in database: {actual_db_count:,}")
+        logging.warning("")
+        logging.warning("Why this happened:")
+        logging.warning("  All the data you're trying to load already exists in the database.")
+        logging.warning("  This usually means you've run the ETL pipeline before with the same data.")
+        logging.warning("")
+        logging.warning("What you can do:")
+        logging.warning("  - To reload everything: TRUNCATE TABLE fact_line_items;")
+        logging.warning("  - To add new data: Add new files to staging tables")
+        logging.warning("  - If this is expected: No action needed - your data is safe")
+        logging.warning("=" * 60)
+    elif total_inserted < total_rows:
+        skipped_count = total_rows - total_inserted
+        logging.info("=" * 60)
+        logging.info("LOAD SUMMARY")
+        logging.info("=" * 60)
+        logging.info(f"Successfully inserted: {total_inserted:,} new rows")
+        logging.info(f"Skipped (already exist): {skipped_count:,} rows")
+        logging.info(f"Total rows in database: {actual_db_count:,}")
+        logging.info("")
+        logging.info("Note: Some rows were skipped because they already exist in the database.")
+        logging.info("This is normal if you're re-running the ETL or have duplicate data in source files.")
+        logging.info("")
+        logging.info(f"Processed: {total_rows:,} rows | Inserted: {total_inserted:,} rows | Final count: {actual_db_count:,} rows")
+        logging.info("")
+        logging.info("Explanation of counts:")
+        logging.info(f"  - Processed ({total_rows:,}): Total rows read from staging tables")
+        logging.info(f"  - Inserted ({total_inserted:,}): New rows added to database")
+        logging.info(f"  - Final count ({actual_db_count:,}): Total rows now in fact_line_items")
+        logging.info(f"  - Difference ({total_rows - total_inserted:,}): Rows skipped (already existed)")
+        logging.info("=" * 60)
+    else:
+        logging.info("=" * 60)
+        logging.info("SUCCESS - All data loaded")
+        logging.info("=" * 60)
+        logging.info(f"Inserted: {total_inserted:,} new rows")
+        logging.info(f"Total rows in database: {actual_db_count:,}")
+        logging.info("=" * 60)
 
 def load_fact_campaign_transactions(df):
     """Load fact_campaign_transactions from transformed DataFrame"""
@@ -730,12 +822,26 @@ def load_fact_campaign_transactions(df):
         if fact_rows:
             logging.info(f"Inserting chunk {chunk_start//CHUNK_SIZE + 1} ({len(fact_rows)} transactions, {chunk_start+1}-{chunk_end} of {total_rows})...")
             with engine.begin() as conn:
+                # Get count before insert to calculate actual inserts
+                result_before = conn.execute(text("SELECT COUNT(*) FROM fact_campaign_transactions"))
+                count_before = result_before.fetchone()[0]
+                
                 conn.execute(text("""
                     INSERT INTO fact_campaign_transactions (order_id, campaign_sk, user_sk, merchant_sk, transaction_date_sk, availed)
                     VALUES (:order_id, :campaign_sk, :user_sk, :merchant_sk, :transaction_date_sk, :availed)
                     ON CONFLICT (campaign_sk, user_sk, merchant_sk, transaction_date_sk) DO NOTHING
                 """), fact_rows)
-            total_inserted += len(fact_rows)
+                
+                # Get count after insert to calculate actual inserts
+                result_after = conn.execute(text("SELECT COUNT(*) FROM fact_campaign_transactions"))
+                count_after = result_after.fetchone()[0]
+                actual_inserted = count_after - count_before
+                
+                if actual_inserted < len(fact_rows):
+                    skipped_conflicts = len(fact_rows) - actual_inserted
+                    logging.info(f"  Inserted: {actual_inserted:,} new rows | Skipped: {skipped_conflicts:,} rows (already exist in database)")
+                
+            total_inserted += actual_inserted
         
         # Clear memory
         del fact_rows
@@ -756,5 +862,28 @@ def load_fact_campaign_transactions(df):
         logging.error(f"  Campaigns: {len(campaign_map)}")
         logging.error("=" * 60)
     
-    logging.info(f"Loaded {total_inserted} campaign transactions into fact_campaign_transactions")
+    # Get actual count from database to verify
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM fact_campaign_transactions"))
+        actual_db_count = result.fetchone()[0]
+    
+    if total_inserted == 0:
+        logging.warning("=" * 60)
+        logging.warning("NO NEW CAMPAIGN TRANSACTIONS INSERTED")
+        logging.warning("=" * 60)
+        logging.warning(f"Summary:")
+        logging.warning(f"  Rows processed: {total_rows:,}")
+        logging.warning(f"  New rows inserted: {total_inserted:,}")
+        logging.warning(f"  Rows skipped (already exist): {total_rows - total_inserted:,}")
+        logging.warning(f"  Total rows in database: {actual_db_count:,}")
+        logging.warning("")
+        logging.warning("All data already exists in the database.")
+        logging.warning("=" * 60)
+    else:
+        logging.info("=" * 60)
+        logging.info("CAMPAIGN TRANSACTIONS LOADED SUCCESSFULLY")
+        logging.info("=" * 60)
+        logging.info(f"Inserted: {total_inserted:,} new transactions")
+        logging.info(f"Total transactions in database: {actual_db_count:,}")
+        logging.info("=" * 60)
 

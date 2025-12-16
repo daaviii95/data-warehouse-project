@@ -482,7 +482,7 @@ def run_load_dim():
     
     # Scenario 3 Support: Ensure Unknown campaign exists before loading dimensions
     logging.info("=" * 60)
-    logging.info("ENSURING UNKNOWN CAMPAIGN EXISTS (Scenario 3)")
+    logging.info("ENSURING UNKNOWN CAMPAIGN EXISTS")
     logging.info("=" * 60)
     try:
         campaign_sk = load_dim.ensure_unknown_campaign()
@@ -505,7 +505,7 @@ def run_load_dim():
     
     # Scenario 3 Support: Update campaign transactions after loading campaigns
     logging.info("=" * 60)
-    logging.info("UPDATING CAMPAIGN TRANSACTIONS FOR LATE-ARRIVING CAMPAIGNS (Scenario 3)")
+    logging.info("UPDATING CAMPAIGN TRANSACTIONS FOR LATE-ARRIVING CAMPAIGNS")
     logging.info("=" * 60)
     try:
         count = load_dim.update_campaign_transactions_for_new_campaigns()
@@ -560,7 +560,7 @@ def run_load_fact():
     # Scenario 2 Support: Create missing dimensions from fact data before loading facts
     # This handles cases where new customers/products appear only in order/line_item data
     logging.info("=" * 60)
-    logging.info("CREATING MISSING DIMENSIONS FROM FACT DATA (Scenario 2)")
+    logging.info("CREATING MISSING DIMENSIONS FROM FACT DATA")
     logging.info("=" * 60)
     new_users_created = load_dim.create_missing_users_from_orders(order_df)
     new_products_created = load_dim.create_missing_products_from_line_items(line_item_products_df)

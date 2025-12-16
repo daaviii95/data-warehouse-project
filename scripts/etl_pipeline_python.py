@@ -193,7 +193,7 @@ def load_file(file_path, clean=True):
         return None
 
 def find_files(pattern, data_dir):
-    """Find files matching pattern"""
+    """Find files matching pattern, excluding Test folder"""
     files = []
     data_path = Path(data_dir)
     if not data_path.exists():
@@ -202,7 +202,15 @@ def find_files(pattern, data_dir):
     
     for file_path in data_path.rglob(pattern):
         if file_path.is_file():
-            files.append(file_path)
+            # Exclude files in Test folder (user will manually add them for testing)
+            try:
+                relative_path = file_path.relative_to(data_path)
+                # Skip if file is in a "Test" directory (any level)
+                if 'Test' not in relative_path.parts:
+                    files.append(file_path)
+            except ValueError:
+                # File is outside data_path, skip it
+                continue
     return sorted(files)
 
 def clean_dataframe(df, file_type=''):
