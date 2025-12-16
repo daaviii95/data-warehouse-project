@@ -176,19 +176,27 @@ def execute_sql_file(sql_file_path):
         if not filtered_statements:
             import logging
             logging.warning(f"No valid SQL statements found in {sql_file_path}")
+            logging.warning("This may cause downstream tasks to fail. Please check the SQL file.")
+            # Don't raise error - allow task to complete but log warning
             return
         
         # Execute each statement
+        import logging
+        logging.info(f"Executing {len(filtered_statements)} SQL statements from {sql_file_path}")
         conn = hook.get_conn()
         try:
             cursor = conn.cursor()
             try:
-                for statement in filtered_statements:
+                for idx, statement in enumerate(filtered_statements, 1):
                     if statement.strip():
+                        logging.debug(f"Executing statement {idx}/{len(filtered_statements)}")
                         cursor.execute(statement)
                 conn.commit()
+                logging.info(f"Successfully executed all statements from {sql_file_path}")
             except Exception as e:
                 conn.rollback()
+                logging.error(f"Error executing statement {idx}/{len(filtered_statements)}: {e}")
+                logging.error(f"Failed statement: {statement[:200]}...")  # Log first 200 chars
                 raise
             finally:
                 cursor.close()
@@ -197,6 +205,8 @@ def execute_sql_file(sql_file_path):
     except Exception as e:
         import logging
         logging.error(f"Error executing SQL file {sql_file_path}: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         raise
 
 default_args = {
@@ -211,19 +221,71 @@ default_args = {
 # SQL execution wrapper functions
 def exec_sql_00():
     """Create staging tables"""
-    execute_sql_file('sql/00_create_staging_tables.sql')
+    import logging
+    logging.info("=" * 60)
+    logging.info("EXECUTING: Create Staging Tables")
+    logging.info("=" * 60)
+    try:
+        execute_sql_file('sql/00_create_staging_tables.sql')
+        logging.info("=" * 60)
+        logging.info("SUCCESS: Staging tables created")
+        logging.info("=" * 60)
+    except Exception as e:
+        logging.error("=" * 60)
+        logging.error(f"FAILED: Create staging tables - {e}")
+        logging.error("=" * 60)
+        raise
 
 def exec_sql_01():
     """Create schema from physical model"""
-    execute_sql_file('sql/01_create_schema_from_physical_model.sql')
+    import logging
+    logging.info("=" * 60)
+    logging.info("EXECUTING: Create Schema")
+    logging.info("=" * 60)
+    try:
+        execute_sql_file('sql/01_create_schema_from_physical_model.sql')
+        logging.info("=" * 60)
+        logging.info("SUCCESS: Schema created")
+        logging.info("=" * 60)
+    except Exception as e:
+        logging.error("=" * 60)
+        logging.error(f"FAILED: Create schema - {e}")
+        logging.error("=" * 60)
+        raise
 
 def exec_sql_02():
     """Populate date dimension"""
-    execute_sql_file('sql/02_populate_dim_date.sql')
+    import logging
+    logging.info("=" * 60)
+    logging.info("EXECUTING: Populate Date Dimension")
+    logging.info("=" * 60)
+    try:
+        execute_sql_file('sql/02_populate_dim_date.sql')
+        logging.info("=" * 60)
+        logging.info("SUCCESS: Date dimension populated")
+        logging.info("=" * 60)
+    except Exception as e:
+        logging.error("=" * 60)
+        logging.error(f"FAILED: Populate date dimension - {e}")
+        logging.error("=" * 60)
+        raise
 
 def exec_sql_03():
     """Create analytical views"""
-    execute_sql_file('sql/03_create_analytical_views.sql')
+    import logging
+    logging.info("=" * 60)
+    logging.info("EXECUTING: Create Analytical Views")
+    logging.info("=" * 60)
+    try:
+        execute_sql_file('sql/03_create_analytical_views.sql')
+        logging.info("=" * 60)
+        logging.info("SUCCESS: Analytical views created")
+        logging.info("=" * 60)
+    except Exception as e:
+        logging.error("=" * 60)
+        logging.error(f"FAILED: Create analytical views - {e}")
+        logging.error("=" * 60)
+        raise
 
 # Ingestion functions
 def run_ingest_marketing():
@@ -278,7 +340,10 @@ def run_extract():
     
     logging.info("=" * 60)
     logging.info("EXTRACTION COMPLETE")
-    logging.info(f"Extracted: {len(campaign_df)} campaigns, {len(order_df)} orders, {len(product_df)} products, {len(user_df)} users")
+    logging.info(f"Extracted: {len(campaign_df) if campaign_df is not None else 0} campaigns, "
+                 f"{len(order_df) if order_df is not None else 0} orders, "
+                 f"{len(product_df) if product_df is not None else 0} products, "
+                 f"{len(user_df) if user_df is not None else 0} users")
     logging.info("=" * 60)
     
     # Return success indicator (DataFrames are too large for XCom)
@@ -327,6 +392,10 @@ def run_transform():
     
     logging.info("=" * 60)
     logging.info("TRANSFORMATION COMPLETE")
+    logging.info(f"Transformed: {len(campaign_df) if campaign_df is not None else 0} campaigns, "
+                 f"{len(order_df) if order_df is not None else 0} orders, "
+                 f"{len(product_df) if product_df is not None else 0} products, "
+                 f"{len(user_df) if user_df is not None else 0} users")
     logging.info("=" * 60)
     
     # Return success indicator (DataFrames are too large for XCom)
@@ -372,7 +441,10 @@ def run_load_dim():
     logging.info("=" * 60)
     try:
         count = load_dim.update_campaign_transactions_for_new_campaigns()
-        logging.info(f"Updated {count} campaign transaction rows")
+        if count > 0:
+            logging.info(f"Updated {count} campaign transaction rows from Unknown to actual campaigns")
+        else:
+            logging.info("No campaign transactions needed updating")
     except Exception as e:
         logging.warning(f"Could not update campaign transactions: {e}")
     
@@ -424,7 +496,10 @@ def run_load_fact():
     logging.info("=" * 60)
     new_users_created = load_dim.create_missing_users_from_orders(order_df)
     new_products_created = load_dim.create_missing_products_from_line_items(line_item_products_df)
-    logging.info(f"Created {new_users_created} missing users and {new_products_created} missing products from fact data")
+    if new_users_created > 0 or new_products_created > 0:
+        logging.info(f"Created {new_users_created} missing users and {new_products_created} missing products from fact data")
+    else:
+        logging.info("No missing dimensions found - all users and products already exist")
     logging.info("=" * 60)
     
     # Load facts (now all dimensions should exist)
@@ -462,7 +537,9 @@ with DAG(
         This includes:
         - Dimension tables: dim_campaign, dim_product, dim_user, dim_staff, dim_merchant, dim_date, dim_user_job, dim_credit_card
         - Fact tables: fact_orders, fact_line_items, fact_campaign_transactions
-        """
+        """,
+        retries=1,
+        retry_delay=timedelta(minutes=1),
     )
 
     # Task 2: Create Staging Tables
@@ -474,7 +551,9 @@ with DAG(
         
         Creates staging tables for each department to store raw data before transformation.
         Staging tables follow naming convention: stg_{department}_{data_type}
-        """
+        """,
+        retries=1,
+        retry_delay=timedelta(minutes=1),
     )
 
     # Task 3: Populate Date Dimension (must be done before fact tables)
@@ -486,7 +565,9 @@ with DAG(
         
         Populates the date dimension table (dim_date) with dates from 2020-01-01 to 2025-12-31.
         This is a standard dimension in Kimball methodology for time-based analysis.
-        """
+        """,
+        retries=1,
+        retry_delay=timedelta(minutes=1),
     )
 
     # Task 4: Ingest Data Per Department -> Staging (Parallel Execution)
