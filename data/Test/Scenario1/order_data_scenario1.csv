@@ -1,0 +1,7 @@
+order_id,user_id,transaction_date,payment_method,total_amount,estimated_arrival_days,staff_id
+scenario1-order-001,USER16283,2024-01-20,Credit Card,125.50,5,STAFF0048737
+scenario1-order-002,USER28531,2024-01-20,Debit Card,89.99,7,STAFF0012345
+scenario1-order-003,USER56935,2024-01-20,Cash,75.25,3,STAFF0048737
+scenario1-order-004,USER11824,2024-01-20,Credit Card,150.00,6,STAFF0056789
+scenario1-order-005,USER51578,2024-01-20,Debit Card,200.75,4,STAFF0012345
+
