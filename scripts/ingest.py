@@ -799,7 +799,7 @@ def ingest_enterprise_department():
             logging.debug(f"  Source columns: {list(df.columns)}")
             df = _format_dataframe_for_staging(df, 'stg_enterprise_department_order_with_merchant_data')
             if df is not None and not df.empty:
-                # Validate required columns per PHYSICALMODEL.txt
+                # Validate required columns per LOGICAL-PHYSICALMODEL.txt
                 required_cols = ['order_id', 'merchant_id', 'staff_id']
                 missing_cols = [col for col in required_cols if col not in df.columns]
                 if missing_cols:
@@ -819,7 +819,7 @@ def ingest_enterprise_department():
     
     logging.info(f"Order with merchant data: {processed_count} files processed, {skipped_count} files skipped")
     if total_loaded > 0:
-        logging.info(f"Total loaded: {total_loaded} order-merchant records (staff_id required per PHYSICALMODEL.txt)")
+        logging.info(f"Total loaded: {total_loaded} order-merchant records (staff_id required per LOGICAL-PHYSICALMODEL.txt)")
 
 def main():
     """Main ingestion function - loads all departments"""

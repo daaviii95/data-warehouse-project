@@ -1319,6 +1319,15 @@ def load_fact_campaign_transactions():
     combined['campaign_id'] = combined['campaign_id'].fillna('CAMPAIGN00000')
     combined['availed'] = combined['availed'].fillna('Not Applicable')
     
+    # Scenario 3 Support: Ensure Unknown campaign exists
+    try:
+        import load_dim
+        unknown_campaign_sk = load_dim.ensure_unknown_campaign()
+        logging.info(f"Unknown campaign_sk: {unknown_campaign_sk}")
+    except Exception as e:
+        logging.warning(f"Could not ensure Unknown campaign: {e}")
+        unknown_campaign_sk = None
+    
     # Pre-load dimension mappings
     logging.info("Pre-loading dimension mappings for fact_campaign_transactions...")
     with engine.connect() as conn:
@@ -1327,6 +1336,10 @@ def load_fact_campaign_transactions():
         result = conn.execute(text("SELECT campaign_sk, campaign_id FROM dim_campaign"))
         for row in result:
             campaign_map[str(row[1])] = row[0]
+        
+        # Add Unknown campaign to map if not present
+        if unknown_campaign_sk and 'UNKNOWN' not in campaign_map:
+            campaign_map['UNKNOWN'] = unknown_campaign_sk
         
         # Fact_orders mapping (order_id -> dimension keys)
         order_map = {}
@@ -1347,10 +1360,20 @@ def load_fact_campaign_transactions():
     for _, row in combined.iterrows():
         try:
             # Get campaign_sk from pre-loaded map
-            campaign_id = str(row.get('campaign_id'))
-            campaign_sk = campaign_map.get(campaign_id)
-            if not campaign_sk:
-                continue
+            campaign_id = str(row.get('campaign_id')).strip() if pd.notna(row.get('campaign_id')) else None
+            if not campaign_id or campaign_id == 'CAMPAIGN00000':
+                # Scenario 3: Use Unknown campaign for missing campaign_id
+                campaign_sk = unknown_campaign_sk if unknown_campaign_sk else None
+                if not campaign_sk:
+                    continue
+            else:
+                campaign_sk = campaign_map.get(campaign_id)
+                # Scenario 3: Use Unknown campaign if campaign_id doesn't exist
+                if not campaign_sk and unknown_campaign_sk:
+                    logging.debug(f"Campaign '{campaign_id}' not found, using Unknown campaign")
+                    campaign_sk = unknown_campaign_sk
+                elif not campaign_sk:
+                    continue
             
             # Get keys from fact_orders
             order_id = str(row.get('order_id'))
@@ -1393,6 +1416,10 @@ def load_fact_campaign_transactions():
 
 def main():
     """Main ETL pipeline - similar to original Python scripts"""
+    # Scenario 1 Support: Track before/after states if enabled
+    ENABLE_SCENARIO1_METRICS = os.getenv("ENABLE_SCENARIO1_METRICS", "false").lower() == "true"
+    TARGET_DATE = os.getenv("TARGET_DATE", None)  # Optional: YYYY-MM-DD format
+    
     logging.info("=" * 60)
     logging.info("Starting ShopZada ETL Pipeline (Python-based)")
     logging.info("=" * 60)
@@ -1407,8 +1434,39 @@ def main():
             logging.error("Schema not created! Please run create_schema task first.")
             return
     
+    # Scenario 1 Support: Log before state if enabled
+    before_state = None
+    if ENABLE_SCENARIO1_METRICS:
+        try:
+            import etl_metrics
+            before_state = etl_metrics.log_before_state(target_date=TARGET_DATE)
+        except Exception as e:
+            logging.warning(f"Could not log before state: {e}")
+    
+    # Scenario 3 Support: Ensure Unknown campaign exists before loading dimensions
+    logging.info("=" * 60)
+    logging.info("ENSURING UNKNOWN CAMPAIGN EXISTS (Scenario 3)")
+    logging.info("=" * 60)
+    try:
+        import load_dim
+        campaign_sk = load_dim.ensure_unknown_campaign()
+        logging.info(f"Unknown campaign ready with campaign_sk: {campaign_sk}")
+    except Exception as e:
+        logging.warning(f"Could not ensure Unknown campaign: {e}")
+    
     # Load dimensions first
     load_dim_campaign()
+    
+    # Scenario 3 Support: Update campaign transactions after loading campaigns
+    logging.info("=" * 60)
+    logging.info("UPDATING CAMPAIGN TRANSACTIONS FOR LATE-ARRIVING CAMPAIGNS (Scenario 3)")
+    logging.info("=" * 60)
+    try:
+        count = load_dim.update_campaign_transactions_for_new_campaigns()
+        logging.info(f"Updated {count} campaign transaction rows")
+    except Exception as e:
+        logging.warning(f"Could not update campaign transactions: {e}")
+    
     load_dim_product()
     load_dim_user()
     load_dim_staff()
@@ -1416,7 +1474,51 @@ def main():
     load_dim_user_job()
     load_dim_credit_card()
     
-    # Load facts (depend on dimensions)
+    # Scenario 2 Support: Create missing dimensions from fact data before loading facts
+    # This handles cases where new customers/products appear only in order/line_item data
+    logging.info("=" * 60)
+    logging.info("CREATING MISSING DIMENSIONS FROM FACT DATA (Scenario 2)")
+    logging.info("=" * 60)
+    
+    # Load order data to extract missing users
+    order_files = find_files("*order_data*", DATA_DIR)
+    if order_files:
+        order_data_list = []
+        for file_path in order_files:
+            df = load_file(file_path)
+            if df is not None:
+                order_data_list.append(df)
+        if order_data_list:
+            order_data = pd.concat(order_data_list, ignore_index=True)
+            # Import and call the function from load_dim module
+            try:
+                import load_dim
+                new_users_created = load_dim.create_missing_users_from_orders(order_data)
+                logging.info(f"Created {new_users_created} missing users from order data")
+            except Exception as e:
+                logging.warning(f"Could not create missing users from orders: {e}")
+    
+    # Load line item products to extract missing products
+    products_files = find_files("*line_item_data_products*", DATA_DIR)
+    if products_files:
+        products_list = []
+        for file_path in products_files:
+            df = load_file(file_path)
+            if df is not None:
+                products_list.append(df)
+        if products_list:
+            products_data = pd.concat(products_list, ignore_index=True)
+            # Import and call the function from load_dim module
+            try:
+                import load_dim
+                new_products_created = load_dim.create_missing_products_from_line_items(products_data)
+                logging.info(f"Created {new_products_created} missing products from line item data")
+            except Exception as e:
+                logging.warning(f"Could not create missing products from line items: {e}")
+    
+    logging.info("=" * 60)
+    
+    # Load facts (now all dimensions should exist)
     load_fact_orders()
     load_fact_line_items()
     load_fact_campaign_transactions()
@@ -1424,6 +1526,15 @@ def main():
     logging.info("=" * 60)
     logging.info("ETL Pipeline Complete!")
     logging.info("=" * 60)
+    
+    # Scenario 1 Support: Log after state and summary if enabled
+    if ENABLE_SCENARIO1_METRICS and before_state is not None:
+        try:
+            import etl_metrics
+            after_state = etl_metrics.log_after_state(before_state, target_date=TARGET_DATE)
+            etl_metrics.log_pipeline_summary(before_state, after_state, target_date=TARGET_DATE)
+        except Exception as e:
+            logging.warning(f"Could not log after state: {e}")
 
 if __name__ == "__main__":
     main()

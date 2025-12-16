@@ -93,17 +93,17 @@ The analytical views are SQL views that aggregate data for easy visualization. Y
 **Using Docker:**
 ```bash
 # From your local machine
-docker exec -i shopzada-db psql -U postgres -d shopzada < sql/13_create_analytical_views.sql
+docker exec -i shopzada-db psql -U postgres -d shopzada < sql/03_create_analytical_views.sql
 ```
 
 **Using PowerShell (Windows):**
 ```powershell
-Get-Content sql/13_create_analytical_views.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
+Get-Content sql/03_create_analytical_views.sql | docker exec -i shopzada-db psql -U postgres -d shopzada
 ```
 
 **Using psql directly:**
 ```bash
-psql -h localhost -p 5432 -U postgres -d shopzada -f sql/13_create_analytical_views.sql
+psql -h localhost -p 5432 -U postgres -d shopzada -f sql/03_create_analytical_views.sql
 ```
 
 ### Verify Views Created
@@ -287,20 +287,23 @@ Create 5 KPI cards using the **Card** visual:
   ```DAX
   Late Delivery Rate = 
   DIVIDE(
-      SUM('vw_merchant_performance'[delayed_orders]),
-      SUM('vw_merchant_performance'[total_orders]),
+      SUM('vw_sales_by_time'[delayed_orders]),
+      SUM('vw_sales_by_time'[total_orders]),
       0
-  ) * 100
+  )
   ```
-- **Format**: Percentage (1 decimal)
+- **Format**: Percentage (1 decimal) - ⚠️ **Do NOT multiply by 100 in DAX if using Percentage format**
+- **Alternative (if using Number format)**: Multiply by 100 in DAX: `* 100`
 - **Title**: "Late Delivery Rate"
 - **Trend Axis**: `vw_sales_by_time[date]` (optional)
+- **Note**: ⚠️ **Use `vw_sales_by_time` (not `vw_merchant_performance`) when filtering by date**. The merchant view aggregates by merchant, not by date, which causes incorrect calculations when date filters are applied.
 
 **5. Total Late Orders**
 - **Visual**: Card
-- **Value**: Create measure `Total Late Orders = SUM('vw_merchant_performance'[delayed_orders])`
+- **Value**: Create measure `Total Late Orders = SUM('vw_sales_by_time'[delayed_orders])`
 - **Format**: Whole number
 - **Title**: "Total Late Orders"
+- **Note**: ⚠️ **Use `vw_sales_by_time` (not `vw_merchant_performance`) when filtering by date**
 - **Trend Axis**: `vw_sales_by_time[date]` (optional)
 
 **Formatting:**
@@ -339,13 +342,14 @@ Create 5 KPI cards using the **Card** visual:
 
 **Chart 2: Late Orders by Day of Month (Vertical Bar Chart)**
 - **Visual**: Column chart
-- **X-axis**: `vw_sales_by_time[day]`
+- **X-axis**: `vw_sales_by_time[day]` ⚠️ **IMPORTANT: Set field to "Don't summarize"**
 - **Y-axis**: `SUM('vw_sales_by_time'[delayed_orders])` ⚠️ **Use vw_sales_by_time, NOT vw_merchant_performance**
 - **Title**: "Late Orders by Day of Month"
 - **Position**: Bottom left
 - **Format**:
   - Color: Red gradient (higher = darker)
   - Data labels: On
+- **⚠️ CRITICAL FIX**: Right-click `day` field → **Don't summarize** (prevents days exceeding 31)
 - **Note**: `vw_sales_by_time` now includes `delayed_orders` aggregated by day, so this will show the correct distribution across days of the month
 
 **Chart 3: Revenue Trend Over Time (Line Chart)**
@@ -599,10 +603,11 @@ Create 5 KPI cards using the **Card** visual:
 
 **4. Revenue Trend by Segment (Line Chart)**
 - **Visual**: Line chart
-- **X-axis**: `vw_sales_by_time[date]` (if time dimension available)
-- **Y-axis**: `SUM('vw_customer_segment_revenue'[total_revenue])`
-- **Legend**: `vw_customer_segment_revenue[customer_segment]`
+- **X-axis**: `vw_segment_revenue_by_time[date]`
+- **Y-axis**: `SUM('vw_segment_revenue_by_time'[total_revenue])`
+- **Legend**: `vw_segment_revenue_by_time[customer_segment]`   
 - **Title**: "Revenue Trend by Segment"
+- **Note**: Uses `vw_segment_revenue_by_time` view which combines date and customer_segment dimensions
 
 ---
 
@@ -877,7 +882,7 @@ If using Docker Desktop on Windows:
    SELECT COUNT(*) FROM fact_orders;
    SELECT COUNT(*) FROM fact_line_items;
    ```
-3. Re-run analytical views creation: Run `shopzada_analytical_views` DAG or execute `sql/13_create_analytical_views.sql`
+3. Re-run analytical views creation: Run `shopzada_analytical_views` DAG or execute `sql/03_create_analytical_views.sql`
 
 ### KPI Visual Issues
 

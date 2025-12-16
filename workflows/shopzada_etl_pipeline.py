@@ -343,6 +343,16 @@ def run_load_dim():
     logging.info("LOADING DIMENSIONS")
     logging.info("=" * 60)
     
+    # Scenario 3 Support: Ensure Unknown campaign exists before loading dimensions
+    logging.info("=" * 60)
+    logging.info("ENSURING UNKNOWN CAMPAIGN EXISTS (Scenario 3)")
+    logging.info("=" * 60)
+    try:
+        campaign_sk = load_dim.ensure_unknown_campaign()
+        logging.info(f"Unknown campaign ready with campaign_sk: {campaign_sk}")
+    except Exception as e:
+        logging.warning(f"Could not ensure Unknown campaign: {e}")
+    
     # Extract and transform data (transform task ensures data is ready)
     logging.info("Extracting and transforming data for dimensions...")
     campaign_df = transform.transform_campaign_data(extract.extract_campaign_data())
@@ -355,6 +365,17 @@ def run_load_dim():
     
     # Load dimensions
     load_dim.load_dim_campaign(campaign_df)
+    
+    # Scenario 3 Support: Update campaign transactions after loading campaigns
+    logging.info("=" * 60)
+    logging.info("UPDATING CAMPAIGN TRANSACTIONS FOR LATE-ARRIVING CAMPAIGNS (Scenario 3)")
+    logging.info("=" * 60)
+    try:
+        count = load_dim.update_campaign_transactions_for_new_campaigns()
+        logging.info(f"Updated {count} campaign transaction rows")
+    except Exception as e:
+        logging.warning(f"Could not update campaign transactions: {e}")
+    
     load_dim.load_dim_product(product_df)
     load_dim.load_dim_user(user_df)
     load_dim.load_dim_staff(staff_df)
@@ -372,6 +393,16 @@ def run_load_fact():
     import extract
     import transform
     import load_fact
+    import load_dim
+    import etl_metrics
+    
+    # Scenario 1 Support: Track before/after states if enabled
+    ENABLE_SCENARIO1_METRICS = os.getenv("ENABLE_SCENARIO1_METRICS", "false").lower() == "true"
+    TARGET_DATE = os.getenv("TARGET_DATE", None)  # Optional: YYYY-MM-DD format
+    
+    before_state = None
+    if ENABLE_SCENARIO1_METRICS:
+        before_state = etl_metrics.log_before_state(target_date=TARGET_DATE)
     
     logging.info("=" * 60)
     logging.info("LOADING FACTS")
@@ -386,7 +417,17 @@ def run_load_fact():
     transactional_campaign_df = transform.transform_transactional_campaign_data(extract.extract_transactional_campaign_data())
     order_merchant_df = extract.extract_order_merchant_data()
     
-    # Load facts
+    # Scenario 2 Support: Create missing dimensions from fact data before loading facts
+    # This handles cases where new customers/products appear only in order/line_item data
+    logging.info("=" * 60)
+    logging.info("CREATING MISSING DIMENSIONS FROM FACT DATA (Scenario 2)")
+    logging.info("=" * 60)
+    new_users_created = load_dim.create_missing_users_from_orders(order_df)
+    new_products_created = load_dim.create_missing_products_from_line_items(line_item_products_df)
+    logging.info(f"Created {new_users_created} missing users and {new_products_created} missing products from fact data")
+    logging.info("=" * 60)
+    
+    # Load facts (now all dimensions should exist)
     load_fact.load_fact_orders(order_df, order_merchant_df, order_delays_df)
     load_fact.load_fact_line_items(line_item_prices_df, line_item_products_df)
     load_fact.load_fact_campaign_transactions(transactional_campaign_df)
@@ -394,6 +435,11 @@ def run_load_fact():
     logging.info("=" * 60)
     logging.info("FACTS LOADED SUCCESSFULLY")
     logging.info("=" * 60)
+    
+    # Scenario 1 Support: Log after state and summary if enabled
+    if ENABLE_SCENARIO1_METRICS and before_state is not None:
+        after_state = etl_metrics.log_after_state(before_state, target_date=TARGET_DATE)
+        etl_metrics.log_pipeline_summary(before_state, after_state, target_date=TARGET_DATE)
 
 with DAG(
     'shopzada_etl_pipeline',
@@ -570,6 +616,10 @@ with DAG(
         - fact_orders
         - fact_line_items
         - fact_campaign_transactions
+        
+        **Scenario 1 Support**: Set environment variable `ENABLE_SCENARIO1_METRICS=true` 
+        and optionally `TARGET_DATE=YYYY-MM-DD` to enable before/after state tracking 
+        and dashboard KPI monitoring.
         """
     )
 

@@ -1,4 +1,4 @@
--- Create Schema Based on Physical Model (physicalmodel.txt)
+-- Create Schema Based on Logical Model (/docs/LOGICAL-PHYSICALMODEL.txt)
 -- Kimball Star Schema Implementation
 -- This script creates ALL dimension and fact tables exactly as specified
 

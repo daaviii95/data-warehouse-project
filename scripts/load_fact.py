@@ -485,9 +485,22 @@ def load_fact_campaign_transactions(df):
     
     logging.info("Loading fact_campaign_transactions...")
     
+    # Scenario 3 Support: Ensure Unknown campaign exists
+    try:
+        import load_dim
+        unknown_campaign_sk = load_dim.ensure_unknown_campaign()
+        logging.info(f"Unknown campaign_sk: {unknown_campaign_sk}")
+    except Exception as e:
+        logging.warning(f"Could not ensure Unknown campaign: {e}")
+        unknown_campaign_sk = None
+    
     # Get dimension mappings
     mappings = get_dimension_mappings()
     campaign_map = mappings['campaign']
+    
+    # Add Unknown campaign to map if not present
+    if unknown_campaign_sk and 'UNKNOWN' not in campaign_map:
+        campaign_map['UNKNOWN'] = unknown_campaign_sk
     
     # Get fact_orders mapping (normalize order_id keys)
     order_map = {}
@@ -518,11 +531,18 @@ def load_fact_campaign_transactions(df):
                 # Clean and normalize campaign_id for lookup
                 campaign_id = str(row.get('campaign_id')).strip() if pd.notna(row.get('campaign_id')) else None
                 if not campaign_id:
-                    continue
-                
-                campaign_sk = campaign_map.get(campaign_id)
-                if not campaign_sk:
-                    continue
+                    # Scenario 3: Use Unknown campaign for missing campaign_id
+                    campaign_sk = unknown_campaign_sk if unknown_campaign_sk else None
+                    if not campaign_sk:
+                        continue
+                else:
+                    campaign_sk = campaign_map.get(campaign_id)
+                    # Scenario 3: Use Unknown campaign if campaign_id doesn't exist
+                    if not campaign_sk and unknown_campaign_sk:
+                        logging.debug(f"Campaign '{campaign_id}' not found, using Unknown campaign")
+                        campaign_sk = unknown_campaign_sk
+                    elif not campaign_sk:
+                        continue
                 
                 order_id = str(row.get('order_id')).strip()
                 order_keys = order_map.get(order_id)
