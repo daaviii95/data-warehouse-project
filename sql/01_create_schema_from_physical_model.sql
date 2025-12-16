@@ -155,6 +155,57 @@ CREATE TABLE IF NOT EXISTS fact_campaign_transactions (
 );
 
 -- ============================================================================
+-- REJECT TABLES FOR DATA QUALITY TRACKING (Scenario 4)
+-- ============================================================================
+
+-- Reject table for fact_orders
+CREATE TABLE IF NOT EXISTS reject_fact_orders (
+    reject_id SERIAL PRIMARY KEY,
+    order_id TEXT,
+    user_id TEXT,
+    merchant_id TEXT,
+    staff_id TEXT,
+    transaction_date TEXT,
+    error_reason TEXT NOT NULL,
+    source_file TEXT,
+    rejected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    raw_data JSONB
+);
+
+-- Reject table for fact_line_items
+CREATE TABLE IF NOT EXISTS reject_fact_line_items (
+    reject_id SERIAL PRIMARY KEY,
+    order_id TEXT,
+    product_id TEXT,
+    line_item_id TEXT,
+    error_reason TEXT NOT NULL,
+    source_file TEXT,
+    rejected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    raw_data JSONB
+);
+
+-- Reject table for fact_campaign_transactions
+CREATE TABLE IF NOT EXISTS reject_fact_campaign_transactions (
+    reject_id SERIAL PRIMARY KEY,
+    order_id TEXT,
+    user_id TEXT,
+    campaign_id TEXT,
+    transaction_date TEXT,
+    error_reason TEXT NOT NULL,
+    source_file TEXT,
+    rejected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    raw_data JSONB
+);
+
+-- Indexes for reject tables
+CREATE INDEX IF NOT EXISTS idx_reject_fact_orders_order_id ON reject_fact_orders(order_id);
+CREATE INDEX IF NOT EXISTS idx_reject_fact_orders_rejected_at ON reject_fact_orders(rejected_at);
+CREATE INDEX IF NOT EXISTS idx_reject_fact_line_items_order_id ON reject_fact_line_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_reject_fact_line_items_rejected_at ON reject_fact_line_items(rejected_at);
+CREATE INDEX IF NOT EXISTS idx_reject_fact_campaign_transactions_order_id ON reject_fact_campaign_transactions(order_id);
+CREATE INDEX IF NOT EXISTS idx_reject_fact_campaign_transactions_rejected_at ON reject_fact_campaign_transactions(rejected_at);
+
+-- ============================================================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================================================
 

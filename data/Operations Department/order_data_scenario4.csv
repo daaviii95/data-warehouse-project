@@ -1,0 +1,17 @@
+order_id,user_id,transaction_date,payment_method,total_amount,estimated_arrival_days,staff_id
+scenario4-order-001,USER28531,2023-05-15,Credit Card,125.50,5,STAFF001
+scenario4-order-002,USER56935,2023-05-16,Debit Card,89.99,7,STAFF002
+scenario4-order-003,INVALID_USER_999,2023-05-17,Cash,75.25,3,STAFF001
+scenario4-order-004,USER11824,2025-13-45,Credit Card,150.00,6,STAFF003
+scenario4-order-005,USER51578,2023-05-18,Debit Card,200.75,4,INVALID_STAFF_999
+scenario4-order-006,,2023-05-19,Credit Card,99.50,8,STAFF001
+scenario4-order-007,USER51925,invalid-date-format,Cash,45.25,5,STAFF003
+scenario4-order-008,USER15061,2023-05-20,Debit Card,175.00,6,STAFF002
+scenario4-order-009,USER58907,2023-05-21,Credit Card,225.50,3,
+scenario4-order-010,USER38831,2023-05-22,Cash,88.75,7,STAFF003
+scenario4-order-011,USER15366,2023-05-23,Debit Card,300.00,4,STAFF001
+scenario4-order-012,USER28531,2023-05-24,Credit Card,150.25,6,STAFF002
+scenario4-order-013,USER56935,2023-05-25,Debit Card,99.99,5,STAFF003
+scenario4-order-014,USER11824,2023-05-26,Cash,75.50,3,STAFF001
+scenario4-order-015,USER51578,2023-05-27,Credit Card,200.00,7,STAFF002
+

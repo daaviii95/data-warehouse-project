@@ -30,6 +30,121 @@ engine = sqlalchemy.create_engine(engine_url, pool_size=5, max_overflow=10, futu
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+def write_to_reject_table(table_name, order_id, error_reason, row_data=None, source_file=None):
+    """Write rejected record to reject table"""
+    try:
+        import json
+        from datetime import datetime, date
+        
+        # Prepare reject record
+        reject_data = {
+            'order_id': str(order_id) if order_id else None,
+            'error_reason': error_reason,
+            'source_file': source_file,
+            'rejected_at': datetime.now()
+        }
+        
+        # Add table-specific fields
+        if table_name == 'reject_fact_orders':
+            reject_data.update({
+                'user_id': str(row_data.get('user_id')) if row_data and row_data.get('user_id') else None,
+                'merchant_id': str(row_data.get('merchant_id')) if row_data and row_data.get('merchant_id') else None,
+                'staff_id': str(row_data.get('staff_id')) if row_data and row_data.get('staff_id') else None,
+                'transaction_date': str(row_data.get('transaction_date')) if row_data and row_data.get('transaction_date') else None,
+            })
+        elif table_name == 'reject_fact_line_items':
+            reject_data.update({
+                'product_id': str(row_data.get('product_id')) if row_data and row_data.get('product_id') else None,
+                'line_item_id': str(row_data.get('line_item_id')) if row_data and row_data.get('line_item_id') else None,
+            })
+        elif table_name == 'reject_fact_campaign_transactions':
+            reject_data.update({
+                'user_id': str(row_data.get('user_id')) if row_data and row_data.get('user_id') else None,
+                'campaign_id': str(row_data.get('campaign_id')) if row_data and row_data.get('campaign_id') else None,
+                'transaction_date': str(row_data.get('transaction_date')) if row_data and row_data.get('transaction_date') else None,
+            })
+        
+        # Convert raw_data to JSON string if needed
+        # Handle NaN values properly (convert to None/null for valid JSON)
+        def json_serializer(obj):
+            """Custom JSON serializer that handles NaN, NaT, and other special values"""
+            import numpy as np
+            from datetime import date, datetime
+            if pd.isna(obj):
+                return None
+            if isinstance(obj, (pd.Timestamp, datetime, date)):
+                return str(obj)
+            if isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
+        raw_data_json = None
+        if row_data:
+            if isinstance(row_data, str):
+                raw_data_json = row_data
+            else:
+                # Convert dict/Series to dict first, handling NaN values
+                if hasattr(row_data, 'to_dict'):
+                    # Handle pandas Series
+                    data_dict = row_data.to_dict()
+                elif isinstance(row_data, dict):
+                    data_dict = row_data
+                else:
+                    data_dict = dict(row_data)
+                
+                # Clean NaN values before JSON serialization
+                import numpy as np
+                cleaned_dict = {}
+                for key, value in data_dict.items():
+                    # Check for NaN/NaT values using multiple methods
+                    is_nan = False
+                    if pd.isna(value):
+                        is_nan = True
+                    elif isinstance(value, float):
+                        is_nan = np.isnan(value)
+                    elif isinstance(value, pd.Timestamp):
+                        is_nan = pd.isna(value)
+                    
+                    if is_nan:
+                        cleaned_dict[key] = None
+                    elif isinstance(value, (pd.Timestamp, date, datetime)):
+                        cleaned_dict[key] = str(value)
+                    elif isinstance(value, (np.integer, np.floating)):
+                        cleaned_dict[key] = value.item()
+                    elif isinstance(value, np.ndarray):
+                        cleaned_dict[key] = value.tolist()
+                    else:
+                        cleaned_dict[key] = value
+                
+                raw_data_json = json.dumps(cleaned_dict, default=json_serializer)
+        
+        # Insert into reject table
+        with engine.begin() as conn:
+            # Build INSERT statement dynamically based on table
+            # Use a separate parameter for raw_data to avoid SQL syntax conflicts
+            insert_params = {**reject_data, 'raw_data_json': raw_data_json}
+            
+            if table_name == 'reject_fact_orders':
+                conn.execute(text("""
+                    INSERT INTO reject_fact_orders (order_id, user_id, merchant_id, staff_id, transaction_date, error_reason, source_file, rejected_at, raw_data)
+                    VALUES (:order_id, :user_id, :merchant_id, :staff_id, :transaction_date, :error_reason, :source_file, :rejected_at, CAST(:raw_data_json AS jsonb))
+                """), insert_params)
+            elif table_name == 'reject_fact_line_items':
+                conn.execute(text("""
+                    INSERT INTO reject_fact_line_items (order_id, product_id, line_item_id, error_reason, source_file, rejected_at, raw_data)
+                    VALUES (:order_id, :product_id, :line_item_id, :error_reason, :source_file, :rejected_at, CAST(:raw_data_json AS jsonb))
+                """), insert_params)
+            elif table_name == 'reject_fact_campaign_transactions':
+                conn.execute(text("""
+                    INSERT INTO reject_fact_campaign_transactions (order_id, user_id, campaign_id, transaction_date, error_reason, source_file, rejected_at, raw_data)
+                    VALUES (:order_id, :user_id, :campaign_id, :transaction_date, :error_reason, :source_file, :rejected_at, CAST(:raw_data_json AS jsonb))
+                """), insert_params)
+    except Exception as e:
+        # Don't fail the ETL if reject table write fails - just log it
+        logging.warning(f"Failed to write to reject table {table_name}: {e}")
+
 def get_dimension_mappings():
     """Pre-load all dimension mappings for faster lookups"""
     logging.info("Pre-loading dimension mappings...")
@@ -209,28 +324,40 @@ def load_fact_orders(order_df, order_merchant_df, delays_df):
                 merchant_sk = merchant_map.get(merchant_id) if merchant_id else None
                 staff_sk = staff_map.get(staff_id) if staff_id else None
                 
+                # Track source file if available
+                source_file = row.get('file_source') if 'file_source' in row else None
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                
                 if not user_sk:
                     skipped_no_user += 1
+                    error_reason = f"user_id '{user_id}' not found in dim_user"
                     if skipped_no_user <= 5:  # Log first few examples
-                        logging.debug(f"Skipping order {row.get('order_id')}: user_id '{user_id}' not found in dim_user")
+                        logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 if not merchant_sk:
                     skipped_no_merchant += 1
+                    error_reason = f"merchant_id '{merchant_id}' not found in dim_merchant"
                     if skipped_no_merchant <= 5:
-                        logging.debug(f"Skipping order {row.get('order_id')}: merchant_id '{merchant_id}' not found in dim_merchant")
+                        logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 if not staff_sk:
                     skipped_no_staff += 1
+                    error_reason = f"staff_id '{staff_id}' not found in dim_staff"
                     if skipped_no_staff <= 5:
-                        logging.debug(f"Skipping order {row.get('order_id')}: staff_id '{staff_id}' not found in dim_staff")
+                        logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 
                 # Get date_sk
                 transaction_date_val = row.get('transaction_date')
                 if pd.isna(transaction_date_val):
                     skipped_invalid_date += 1
+                    error_reason = "null transaction_date"
                     if skipped_invalid_date <= 5:
-                        logging.debug(f"Skipping order {row.get('order_id')}: null transaction_date")
+                        logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 
                 # Handle both date objects and strings
@@ -243,16 +370,20 @@ def load_fact_orders(order_df, order_merchant_df, delays_df):
                     transaction_date = pd.to_datetime(transaction_date_val, errors='coerce')
                     if pd.isna(transaction_date):
                         skipped_invalid_date += 1
+                        error_reason = f"invalid transaction_date format '{transaction_date_val}'"
                         if skipped_invalid_date <= 5:
-                            logging.debug(f"Skipping order {row.get('order_id')}: invalid transaction_date '{transaction_date_val}'")
+                            logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                        write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                         continue
                     date_str = transaction_date.strftime('%Y-%m-%d')
                 
                 date_sk = date_map.get(date_str)
                 if not date_sk:
                     skipped_no_date += 1
+                    error_reason = f"date '{date_str}' not found in dim_date"
                     if skipped_no_date <= 5:
-                        logging.debug(f"Skipping order {row.get('order_id')}: date '{date_str}' not found in dim_date (available dates: {list(date_map.keys())[:5]}...)")
+                        logging.debug(f"Skipping order {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 
                 # Get estimated_arrival_days and delay_days
@@ -272,7 +403,11 @@ def load_fact_orders(order_df, order_merchant_df, delays_df):
                     'delay_days': delay_days
                 })
             except Exception as e:
+                error_reason = f"Exception during processing: {str(e)}"
                 logging.warning(f"Error preparing order {row.get('order_id')}: {e}")
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                source_file = row.get('file_source') if 'file_source' in row else None
+                write_to_reject_table('reject_fact_orders', row.get('order_id'), error_reason, row_dict, source_file)
                 continue
         
         # Insert this chunk immediately
@@ -406,26 +541,36 @@ def load_fact_line_items(prices_df, products_df):
         for _, row in chunk_df.iterrows():
             try:
                 # Clean and normalize product_id for lookup
+                # Track source file if available
+                source_file = row.get('file_source') if 'file_source' in row else None
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                
                 product_id = str(row.get('product_id')).strip() if pd.notna(row.get('product_id')) else None
                 if not product_id:
                     skipped_no_product += 1
+                    error_reason = "product_id is NULL"
                     if skipped_no_product <= 5:
-                        logging.debug(f"Skipping line item {row.get('order_id')}: product_id is NULL")
+                        logging.debug(f"Skipping line item {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_line_items', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 
                 product_sk = product_map.get(product_id)
                 if not product_sk:
                     skipped_no_product += 1
+                    error_reason = f"product_id '{product_id}' not found in dim_product"
                     if skipped_no_product <= 5:
-                        logging.debug(f"Skipping line item {row.get('order_id')}: product_id '{product_id}' not found in dim_product")
+                        logging.debug(f"Skipping line item {row.get('order_id')}: {error_reason}")
+                    write_to_reject_table('reject_fact_line_items', row.get('order_id'), error_reason, row_dict, source_file)
                     continue
                 
                 order_id = str(row.get('order_id')).strip()
                 order_keys = order_map.get(order_id)
                 if not order_keys:
                     skipped_no_order += 1
+                    error_reason = f"order_id '{order_id}' not found in fact_orders"
                     if skipped_no_order <= 5:
-                        logging.debug(f"Skipping line item: order_id '{order_id}' not found in fact_orders")
+                        logging.debug(f"Skipping line item: {error_reason}")
+                    write_to_reject_table('reject_fact_line_items', order_id, error_reason, row_dict, source_file)
                     continue
                 
                 fact_rows.append({
@@ -439,7 +584,11 @@ def load_fact_line_items(prices_df, products_df):
                     'quantity': extract_numeric(row.get('quantity')) or 0
                 })
             except Exception as e:
+                error_reason = f"Exception during processing: {str(e)}"
                 logging.warning(f"Error preparing line item {row.get('order_id')}: {e}")
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                source_file = row.get('file_source') if 'file_source' in row else None
+                write_to_reject_table('reject_fact_line_items', row.get('order_id'), error_reason, row_dict, source_file)
                 continue
         
         # Insert this chunk immediately
@@ -528,12 +677,18 @@ def load_fact_campaign_transactions(df):
         fact_rows = []
         for _, row in chunk_df.iterrows():
             try:
+                # Track source file if available
+                source_file = row.get('file_source') if 'file_source' in row else None
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                
                 # Clean and normalize campaign_id for lookup
                 campaign_id = str(row.get('campaign_id')).strip() if pd.notna(row.get('campaign_id')) else None
                 if not campaign_id:
                     # Scenario 3: Use Unknown campaign for missing campaign_id
                     campaign_sk = unknown_campaign_sk if unknown_campaign_sk else None
                     if not campaign_sk:
+                        error_reason = "campaign_id is NULL and Unknown campaign not available"
+                        write_to_reject_table('reject_fact_campaign_transactions', row.get('order_id'), error_reason, row_dict, source_file)
                         continue
                 else:
                     campaign_sk = campaign_map.get(campaign_id)
@@ -542,13 +697,17 @@ def load_fact_campaign_transactions(df):
                         logging.debug(f"Campaign '{campaign_id}' not found, using Unknown campaign")
                         campaign_sk = unknown_campaign_sk
                     elif not campaign_sk:
+                        error_reason = f"campaign_id '{campaign_id}' not found in dim_campaign and Unknown campaign not available"
+                        write_to_reject_table('reject_fact_campaign_transactions', row.get('order_id'), error_reason, row_dict, source_file)
                         continue
                 
                 order_id = str(row.get('order_id')).strip()
                 order_keys = order_map.get(order_id)
                 if not order_keys:
+                    error_reason = f"order_id '{order_id}' not found in fact_orders"
                     if total_inserted == 0 and len(fact_rows) == 0:  # Only log if we haven't inserted anything yet
-                        logging.debug(f"Skipping campaign transaction: order_id '{order_id}' not found in fact_orders")
+                        logging.debug(f"Skipping campaign transaction: {error_reason}")
+                    write_to_reject_table('reject_fact_campaign_transactions', order_id, error_reason, row_dict, source_file)
                     continue
                 
                 fact_rows.append({
@@ -560,7 +719,11 @@ def load_fact_campaign_transactions(df):
                     'availed': row.get('availed')
                 })
             except Exception as e:
+                error_reason = f"Exception during processing: {str(e)}"
                 logging.warning(f"Error preparing campaign transaction {row.get('order_id')}: {e}")
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                source_file = row.get('file_source') if 'file_source' in row else None
+                write_to_reject_table('reject_fact_campaign_transactions', row.get('order_id'), error_reason, row_dict, source_file)
                 continue
         
         # Insert this chunk immediately
