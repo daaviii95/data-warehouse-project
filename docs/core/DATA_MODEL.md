@@ -169,7 +169,7 @@ The data warehouse follows a **Star Schema** design with:
 | estimated_arrival_days | INTEGER | Estimated delivery days |
 | delay_days | INTEGER | Actual delay days |
 
-**Primary Key**: (user_sk, merchant_sk, staff_sk, transaction_date_sk)
+**Primary Key**: order_id (unique constraint)
 
 **Grain**: One row per order
 
@@ -191,7 +191,7 @@ The data warehouse follows a **Star Schema** design with:
 | price | DECIMAL(10,2) | Line item price |
 | quantity | INTEGER | Quantity ordered |
 
-**Primary Key**: (product_sk, user_sk, merchant_sk, staff_sk, transaction_date_sk)
+**Primary Key**: (order_id, product_sk) - unique constraint
 
 **Grain**: One row per line item
 
@@ -259,4 +259,7 @@ All dimensions use **auto-incrementing surrogate keys** (SERIAL) to:
 - **Not Null**: Critical fact table columns are NOT NULL
 - **Unique Constraints**: Business keys are unique in dimensions
 - **Data Type Validation**: Automated checks for valid ranges (e.g., prices > 0)
+- **Reject Tables**: Invalid data captured in reject tables (reject_fact_orders, reject_fact_line_items, reject_fact_campaign_transactions)
+  - Stores error reasons and raw data in JSONB format
+  - Prevents silent data corruption
 

@@ -408,7 +408,8 @@ def ingest_marketing_department():
             continue
         
         logging.info(f"Loading campaign data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        # load_file will automatically prefer parquet if available and up to date
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             # Format and filter data for staging table
             df = _format_dataframe_for_staging(df, 'stg_marketing_department_campaign_data')
@@ -434,7 +435,7 @@ def ingest_marketing_department():
             continue
         
         logging.info(f"Loading transactional campaign data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_marketing_department_transactional_campaign_data')
             if df is not None and not df.empty:
@@ -473,7 +474,7 @@ def ingest_operations_department():
             continue
         
         logging.info(f"Loading order data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_operations_department_order_data')
             if df is not None and not df.empty:
@@ -497,7 +498,7 @@ def ingest_operations_department():
             continue
         
         logging.info(f"Loading line item prices from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_operations_department_line_item_data_prices')
             if df is not None and not df.empty:
@@ -523,7 +524,7 @@ def ingest_operations_department():
             continue
         
         logging.info(f"Loading line item products from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             # Log source columns for debugging
             logging.debug(f"  Source columns: {list(df.columns)}")
@@ -568,7 +569,7 @@ def ingest_operations_department():
             continue
         
         logging.info(f"Loading order delays from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_operations_department_order_delays')
             if df is not None and not df.empty:
@@ -604,7 +605,7 @@ def ingest_business_department():
             continue
         
         logging.info(f"Loading product list from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_business_department_product_list')
             if df is not None and not df.empty:
@@ -642,7 +643,7 @@ def ingest_customer_management_department():
             continue
         
         logging.info(f"Loading user data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_customer_management_department_user_data')
             if df is not None and not df.empty:
@@ -666,7 +667,7 @@ def ingest_customer_management_department():
             continue
         
         logging.info(f"Loading user job data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_customer_management_department_user_job')
             if df is not None and not df.empty:
@@ -690,7 +691,7 @@ def ingest_customer_management_department():
             continue
         
         logging.info(f"Loading user credit card data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             # Log source columns for debugging
             logging.debug(f"  Source columns: {list(df.columns)}")
@@ -743,7 +744,7 @@ def ingest_enterprise_department():
             continue
         
         logging.info(f"Loading merchant data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_enterprise_department_merchant_data')
             if df is not None and not df.empty:
@@ -767,7 +768,7 @@ def ingest_enterprise_department():
             continue
         
         logging.info(f"Loading staff data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             df = _format_dataframe_for_staging(df, 'stg_enterprise_department_staff_data')
             if df is not None and not df.empty:
@@ -793,7 +794,7 @@ def ingest_enterprise_department():
             continue
         
         logging.info(f"Loading order with merchant data from: {file_path} ({reason})")
-        df = load_file(file_path, clean=True)
+        df = load_file(file_path, clean=True, prefer_parquet=True)
         if df is not None and not df.empty:
             # Log source columns for debugging
             logging.debug(f"  Source columns: {list(df.columns)}")

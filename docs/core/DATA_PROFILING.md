@@ -318,6 +318,7 @@ LEFT JOIN fact_line_items fli ON fo.order_id = fli.order_id;
 
 - **Data Model**: See `docs/core/DATA_MODEL.md` for schema details
 - **ETL Pipeline**: See `docs/core/WORKFLOW.md` for ETL process
-- **Data Quality Dashboard**: See `dashboard/DATA_QUALITY_DASHBOARD_GUIDE.md` for monitoring setup
+- **Architecture**: See `docs/core/ARCHITECTURE.md` for system architecture
+- **Incremental Loading**: See `docs/core/INCREMENTAL_LOADING.md` for file tracking
 - **Business Questions**: See `docs/core/BUSINESS_QUESTIONS.md` for analytical use cases
 

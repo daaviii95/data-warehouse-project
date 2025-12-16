@@ -381,6 +381,23 @@ def run_ingest_enterprise():
     import ingest
     ingest.ingest_enterprise_department()
 
+def run_preprocess_to_parquet():
+    """Pre-process raw files to parquet format for faster ingestion"""
+    import logging
+    logging.info("=" * 60)
+    logging.info("PRE-PROCESSING RAW FILES TO PARQUET")
+    logging.info("=" * 60)
+    try:
+        from preprocess_to_parquet import preprocess_all_files
+        processed, skipped, errors = preprocess_all_files()
+        logging.info(f"Pre-processing complete: {processed} processed, {skipped} skipped, {errors} errors")
+    except Exception as e:
+        logging.error(f"Error in pre-processing: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        # Don't fail the DAG - ingestion can fallback to raw files
+        logging.warning("Pre-processing failed, but ingestion will continue with raw files")
+
 # Extract function
 def run_extract():
     """Extract data from staging tables"""
@@ -792,7 +809,14 @@ with DAG(
 
     # Define task dependencies: Schema -> Staging -> Ingest -> Extract -> Transform -> Load Dim -> Load Fact -> Views
     # 1. Schema -> Staging -> Date Dimension
-    create_schema >> create_staging_tables >> populate_date_dimension
+    # Pre-processing task (optional, can be skipped if parquet files don't exist)
+    preprocess_to_parquet = PythonOperator(
+        task_id='preprocess_to_parquet',
+        python_callable=run_preprocess_to_parquet,
+        dag=dag,
+    )
+
+    create_schema >> create_staging_tables >> preprocess_to_parquet >> populate_date_dimension
     
     # 2. Date Dimension -> Ingest (all departments in parallel)
     populate_date_dimension >> [

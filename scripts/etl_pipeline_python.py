@@ -31,13 +31,48 @@ password_quoted = quote_plus(DB_PASS)
 engine_url = f"postgresql+psycopg2://{DB_USER}:{password_quoted}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = sqlalchemy.create_engine(engine_url, pool_size=5, max_overflow=10, future=True)
 
-def load_file(file_path, clean=True):
+def load_file(file_path, clean=True, prefer_parquet=True):
     """
     Load file based on extension and optionally clean it
+    Prefers parquet version if available and up to date
+    
     Args:
         file_path: Path to file
         clean: Whether to apply data cleaning (default: True)
+        prefer_parquet: If True, check for cleaned parquet version first (default: True)
     """
+    file_path = Path(file_path)
+    
+    # Check for parquet version if prefer_parquet is enabled
+    if prefer_parquet and file_path.suffix.lower() != '.parquet':
+        cleaned_dir = os.getenv("CLEANED_DATA_DIR", os.path.join(os.getenv("DATA_DIR", "/opt/airflow/data"), "cleaned"))
+        data_dir = os.getenv("DATA_DIR", "/opt/airflow/data")
+        
+        # Generate parquet path
+        try:
+            original_path = Path(file_path)
+            data_path = Path(data_dir)
+            relative_path = original_path.relative_to(data_path)
+            parquet_name = relative_path.stem + ".parquet"
+            parquet_path = Path(cleaned_dir) / relative_path.parent / parquet_name
+        except ValueError:
+            parquet_path = Path(cleaned_dir) / (original_path.stem + ".parquet")
+        
+        # Use parquet if it exists and is newer than original
+        if parquet_path.exists():
+            try:
+                original_mtime = os.path.getmtime(file_path) if file_path.exists() else 0
+                parquet_mtime = os.path.getmtime(parquet_path)
+                
+                # Use parquet if it's newer or same age (means it's up to date)
+                if parquet_mtime >= original_mtime:
+                    logging.debug(f"Using cleaned parquet: {parquet_path} (original: {file_path})")
+                    file_path = parquet_path
+                    # Parquet files are already cleaned, so clean=False
+                    clean = False
+            except Exception as e:
+                logging.debug(f"Could not compare file times, using original: {e}")
+    
     ext = file_path.suffix.lower()
     try:
         if ext == '.csv':

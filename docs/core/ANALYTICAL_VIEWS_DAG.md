@@ -90,14 +90,14 @@ Analytical Views (separate DAG)
 - Run the main ETL pipeline first to refresh underlying data
 - Then run analytical views DAG to refresh views
 
-## Files Modified
+## Files
 
-1. **`workflows/shopzada_analytical_views.py`** - New separate DAG
-2. **`workflows/shopzada_etl_pipeline.py`** - Removed analytical views task
-3. **`docs/DATA_QUALITY_REPORT.md`** - Updated with fixes
+1. **`workflows/shopzada_analytical_views.py`** - Separate DAG for analytical views
+2. **`workflows/shopzada_etl_pipeline.py`** - Main ETL pipeline (does not include analytical views)
 
-## Data Quality Fixes Applied
+## Notes
 
-1. **delay_days NULL handling**: Fixed to use `NULL` instead of `-1` when delay data is missing
-2. **Orders without line items**: Documented as expected behavior (2.69% of orders)
+- Views are automatically created as part of the main ETL pipeline
+- This separate DAG allows quick refresh without running full ETL
+- Views are idempotent - safe to run multiple times
 

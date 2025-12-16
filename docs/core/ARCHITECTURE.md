@@ -49,12 +49,14 @@ ShopZada's Data Warehouse solution follows the **Kimball Methodology** with a mu
 ## Data Flow
 
 ```
-Data Sources → Staging Tables → Extract → Transform → Load Dimensions → Create Missing Dims → Load Facts → Analytical Views → BI Tools
+Data Sources → Pre-Process to Parquet (Optional) → Staging Tables → Extract → Transform → Load Dimensions → Create Missing Dims → Load Facts → Analytical Views → BI Tools
 ```
 
 **Current Implementation:**
+- **Parquet Pre-Processing**: Optional step that converts raw files to cleaned parquet format for 3-12x faster ingestion
 - **Staging-Based ETL**: Data is first ingested into staging tables, then extracted, transformed, and loaded
 - **Incremental Loading**: Only processes new/changed files (see [Incremental Loading](INCREMENTAL_LOADING.md))
+- **Automatic Fallback**: Ingestion automatically uses parquet if available, falls back to raw files
 - **Scenario 2 Support**: Automatically creates missing dimensions from fact data
 - **Scenario 1 Support**: Optional before/after state tracking and dashboard KPI monitoring
 - **File Support**: CSV (tab/comma-separated), Parquet, JSON, Excel, Pickle, HTML
@@ -64,15 +66,17 @@ Data Sources → Staging Tables → Extract → Transform → Load Dimensions �
 1. **Kimball Methodology**: Chosen for business-user-friendly star schemas and rapid development
 2. **Surrogate Keys**: All dimensions use auto-incrementing surrogate keys (SK) for SCD handling
 3. **Date Dimension**: Pre-populated time dimension for consistent time-based analysis
-4. **Staging Layer**: Data first loaded into staging tables for separation of concerns and debugging
-5. **Incremental Loading**: Tracks processed files to avoid duplicate processing
-6. **Late-Arriving Dimensions** (Scenario 2): Creates missing dimensions from fact data automatically
-7. **Pipeline Metrics** (Scenario 1): Optional before/after state tracking for validation
-8. **Data Quality**: Automated validation checks after ETL completion
-9. **Idempotent Operations**: All ETL operations use `ON CONFLICT` clauses for safe re-runs
+4. **Parquet Pre-Processing**: Optional optimization that converts raw files to cleaned parquet for faster ingestion
+5. **Staging Layer**: Data first loaded into staging tables for separation of concerns and debugging
+6. **Incremental Loading**: Tracks processed files to avoid duplicate processing
+7. **Late-Arriving Dimensions** (Scenario 2): Creates missing dimensions from fact data automatically
+8. **Pipeline Metrics** (Scenario 1): Optional before/after state tracking for validation
+9. **Data Quality**: Reject tables capture invalid data while valid data proceeds (Scenario 4)
+10. **Idempotent Operations**: All ETL operations use `ON CONFLICT` clauses for safe re-runs
 
 ## Scalability Considerations
 
+- **Parquet Pre-Processing**: 3-12x faster ingestion by using columnar format
 - **Horizontal Scaling**: Airflow supports distributed execution
 - **Partitioning**: Fact tables can be partitioned by date
 - **Indexing**: Strategic indexes on foreign keys and date columns
@@ -92,5 +96,18 @@ Data Sources → Staging Tables → Extract → Transform → Load Dimensions �
 - **Purpose**: Handle late-arriving dimensions (customers/products appearing only in order data)
 - **Features**: Automatic dimension creation from fact data before fact loading
 - **Implementation**: `create_missing_users_from_orders()` and `create_missing_products_from_line_items()`
-- **Documentation**: [Scenario 2 Analysis](../testing-scenarios/SCENARIO2_ANALYSIS.md)
+
+### Scenario 3: Late & Missing Campaign Data
+- **Purpose**: Handle optional or late-arriving campaign data
+- **Features**: Unknown campaign placeholder for missing campaign_id values
+- **Implementation**: `ensure_unknown_campaign()` and `update_campaign_transactions_for_new_campaigns()`
+
+### Scenario 4: Data Quality Failure & Error Handling
+- **Purpose**: Ensure invalid data doesn't corrupt the warehouse
+- **Features**: Reject tables capture invalid records with error reasons and raw data
+- **Implementation**: `write_to_reject_table()` function and reject table schemas
+
+### Scenario 5: Performance & Aggregation Consistency
+- **Purpose**: Verify analytical layer consistency and performance
+- **Features**: KPI verification queries and performance testing
 
