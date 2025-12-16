@@ -40,28 +40,67 @@ docker_repo_scripts = Path('/opt/airflow/repo/scripts')
 docker_repo_sql = Path('/opt/airflow/repo/sql')
 
 # Add scripts directory to path (works in both Docker and local)
+logging.info("=" * 60)
+logging.info("INITIALIZING DAG: shopzada_etl_pipeline")
+logging.info(f"DAG_DIR: {DAG_DIR}")
+logging.info(f"PROJECT_ROOT: {PROJECT_ROOT}")
+logging.info(f"Checking for scripts directory...")
+logging.info(f"  Docker path: {docker_repo_scripts} (exists: {docker_repo_scripts.exists()})")
+logging.info(f"  Local path: {SCRIPTS_DIR} (exists: {SCRIPTS_DIR.exists()})")
+
 if docker_repo_scripts.exists():
     # Docker environment
+    logging.info("Using Docker environment paths")
     sys.path.insert(0, str(docker_repo_scripts))
     SQL_DIR = docker_repo_sql
+    logging.info(f"SQL_DIR set to: {SQL_DIR}")
 elif SCRIPTS_DIR.exists():
     # Local environment
+    logging.info("Using local environment paths")
     sys.path.insert(0, str(SCRIPTS_DIR))
+    logging.info(f"SQL_DIR set to: {SQL_DIR}")
 else:
     logging.warning(f"Scripts directory not found at {SCRIPTS_DIR} or {docker_repo_scripts}")
+    logging.warning("DAG may fail to import modules!")
+
+logging.info("=" * 60)
 
 def execute_sql_file(sql_file_path):
     """Helper function to execute SQL file"""
     try:
+        import logging
+        logging.info(f"Attempting to execute SQL file: {sql_file_path}")
+        logging.info(f"SQL_DIR is set to: {SQL_DIR}")
+        logging.info(f"SQL_DIR exists: {SQL_DIR.exists()}")
+        
         hook = PostgresHook(postgres_conn_id='shopzada_postgres')
+        
+        # Strip 'sql/' prefix if present (SQL_DIR already points to the sql directory)
+        if sql_file_path.startswith('sql/'):
+            sql_file_path = sql_file_path[4:]  # Remove 'sql/' prefix
+            logging.info(f"Stripped 'sql/' prefix, using: {sql_file_path}")
         
         # SQL_DIR is already set correctly (Docker or local) in module initialization
         full_path = SQL_DIR / sql_file_path
         
+        logging.info(f"Looking for SQL file at: {full_path}")
+        logging.info(f"Full path exists: {full_path.exists()}")
+        
         if not full_path.exists():
-            raise FileNotFoundError(f"SQL file not found: {full_path}")
+            # Try alternative paths for better error message
+            alt_paths = [
+                PROJECT_ROOT / sql_file_path,
+                Path(f'/opt/airflow/repo/{sql_file_path}'),
+                Path(f'/opt/airflow/dags/{sql_file_path}'),
+            ]
+            logging.error(f"SQL file not found at primary path: {full_path}")
+            logging.error("Tried alternative paths:")
+            for alt_path in alt_paths:
+                logging.error(f"  - {alt_path} (exists: {alt_path.exists()})")
+            raise FileNotFoundError(f"SQL file not found: {full_path}. Checked SQL_DIR={SQL_DIR}, file={sql_file_path}")
         
         full_path = str(full_path)
+        logging.info(f"Successfully found SQL file at: {full_path}")
         
         with open(full_path, 'r') as f:
             sql = f.read()

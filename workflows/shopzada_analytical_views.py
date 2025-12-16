@@ -48,7 +48,13 @@ default_args = {
 def execute_sql_file(sql_file_path):
     """Helper function to execute SQL file"""
     try:
+        import logging
         hook = PostgresHook(postgres_conn_id='shopzada_postgres')
+        
+        # Strip 'sql/' prefix if present (SQL_DIR already points to the sql directory)
+        if sql_file_path.startswith('sql/'):
+            sql_file_path = sql_file_path[4:]  # Remove 'sql/' prefix
+            logging.info(f"Stripped 'sql/' prefix, using: {sql_file_path}")
         
         # SQL_DIR is already set correctly (Docker or local) in module initialization
         full_path = SQL_DIR / sql_file_path
