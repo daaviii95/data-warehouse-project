@@ -21,18 +21,47 @@ from datetime import timedelta
 import sys
 import os
 import logging
+from pathlib import Path
 
-# Add scripts directory to path
-sys.path.insert(0, '/opt/airflow/repo/scripts')
+# Get the project root directory dynamically
+# In Docker: /opt/airflow/dags (where DAGs are mounted)
+# Locally: parent of workflows directory
+DAG_DIR = Path(__file__).parent.absolute()
+PROJECT_ROOT = DAG_DIR.parent
+
+# Determine scripts and SQL paths
+# In Docker: scripts are at /opt/airflow/repo/scripts (not /opt/airflow/scripts)
+# Locally: scripts are at PROJECT_ROOT/scripts
+SCRIPTS_DIR = PROJECT_ROOT / 'scripts'
+SQL_DIR = PROJECT_ROOT / 'sql'
+
+# Check for Docker repo structure first
+docker_repo_scripts = Path('/opt/airflow/repo/scripts')
+docker_repo_sql = Path('/opt/airflow/repo/sql')
+
+# Add scripts directory to path (works in both Docker and local)
+if docker_repo_scripts.exists():
+    # Docker environment
+    sys.path.insert(0, str(docker_repo_scripts))
+    SQL_DIR = docker_repo_sql
+elif SCRIPTS_DIR.exists():
+    # Local environment
+    sys.path.insert(0, str(SCRIPTS_DIR))
+else:
+    logging.warning(f"Scripts directory not found at {SCRIPTS_DIR} or {docker_repo_scripts}")
 
 def execute_sql_file(sql_file_path):
     """Helper function to execute SQL file"""
     try:
         hook = PostgresHook(postgres_conn_id='shopzada_postgres')
-        full_path = f'/opt/airflow/repo/{sql_file_path}'
         
-        if not os.path.exists(full_path):
+        # SQL_DIR is already set correctly (Docker or local) in module initialization
+        full_path = SQL_DIR / sql_file_path
+        
+        if not full_path.exists():
             raise FileNotFoundError(f"SQL file not found: {full_path}")
+        
+        full_path = str(full_path)
         
         with open(full_path, 'r') as f:
             sql = f.read()

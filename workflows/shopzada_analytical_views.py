@@ -17,6 +17,24 @@ from datetime import datetime, timedelta
 import sys
 import os
 import re
+from pathlib import Path
+
+# Get the project root directory dynamically
+# In Docker: /opt/airflow/dags (where DAGs are mounted)
+# Locally: parent of workflows directory
+DAG_DIR = Path(__file__).parent.absolute()
+PROJECT_ROOT = DAG_DIR.parent
+
+# Determine SQL path
+# In Docker: SQL files are at /opt/airflow/repo/sql (not /opt/airflow/sql)
+# Locally: SQL files are at PROJECT_ROOT/sql
+SQL_DIR = PROJECT_ROOT / 'sql'
+
+# Check for Docker repo structure first
+docker_repo_sql = Path('/opt/airflow/repo/sql')
+if docker_repo_sql.exists():
+    # Docker environment
+    SQL_DIR = docker_repo_sql
 
 default_args = {
     'owner': 'shopzada-data-engineering',
@@ -31,10 +49,14 @@ def execute_sql_file(sql_file_path):
     """Helper function to execute SQL file"""
     try:
         hook = PostgresHook(postgres_conn_id='shopzada_postgres')
-        full_path = f'/opt/airflow/repo/{sql_file_path}'
         
-        if not os.path.exists(full_path):
+        # SQL_DIR is already set correctly (Docker or local) in module initialization
+        full_path = SQL_DIR / sql_file_path
+        
+        if not full_path.exists():
             raise FileNotFoundError(f"SQL file not found: {full_path}")
+        
+        full_path = str(full_path)
         
         with open(full_path, 'r') as f:
             sql = f.read()
