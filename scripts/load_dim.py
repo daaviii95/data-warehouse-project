@@ -413,19 +413,33 @@ def create_missing_products_from_line_items(products_df):
     
     logging.info(f"Creating {len(missing_product_ids)} missing product dimension entries...")
     
+    # Create a mapping of product_id to product_name from the products_df (if available)
+    product_name_map = {}
+    if 'product_name' in products_df.columns:
+        for _, row in products_df.iterrows():
+            pid = str(row.get('product_id')).strip() if pd.notna(row.get('product_id')) else None
+            pname = row.get('product_name') if pd.notna(row.get('product_name')) else None
+            if pid and pid in missing_product_ids and pname:
+                # Use the first non-null product_name found for each product_id
+                if pid not in product_name_map:
+                    product_name_map[pid] = str(pname).strip()
+    
     # Create minimal dim_product entries for missing products
-    # Use NULL/default values for attributes not available in line item data
+    # Extract product_name from line item data if available
     created_count = 0
     with engine.begin() as conn:
         for product_id in missing_product_ids:
             try:
+                # Get product_name from map if available, otherwise None
+                product_name = product_name_map.get(product_id, None)
+                
                 conn.execute(text("""
                     INSERT INTO dim_product (product_id, product_name, product_type, price)
                     VALUES (:product_id, :product_name, :product_type, :price)
                     ON CONFLICT (product_id) DO NOTHING
                 """), {
                     'product_id': str(product_id),
-                    'product_name': None,  # Not available in line item data
+                    'product_name': product_name,  # Extract from line item data if available
                     'product_type': None,
                     'price': None
                 })

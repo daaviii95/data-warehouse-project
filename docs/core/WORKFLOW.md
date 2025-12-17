@@ -7,25 +7,22 @@ The ShopZada ETL pipeline is orchestrated by Apache Airflow and follows a **stag
 ## Workflow Structure
 
 ```
-Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → Extract → Transform → Load Dim → Create Missing Dims → Load Fact → Views
+Schema → Staging → Date Dimension → Ingest → Extract → Transform → Load Dim → Create Missing Dims → Load Fact → Views
 ```
 
 **Detailed Flow:**
 1. **Schema**: Create all dimension and fact tables from physical model
 2. **Staging**: Create staging tables for raw data
-3. **Pre-Process to Parquet** (Optional): Convert raw files to cleaned parquet format for faster ingestion
-4. **Date Dimension**: Populate date dimension (prerequisite for facts)
-5. **Ingest**: Load raw/parquet data per department into staging tables (parallel execution, incremental loading)
-   - Automatically prefers parquet files if available and up-to-date
-   - Falls back to raw files if parquet doesn't exist
-6. **Extract**: Extract data from staging tables into pandas DataFrames
-7. **Transform**: Clean and transform extracted data
-8. **Load Dim**: Load transformed data into dimension tables (from separate dimension files)
-9. **Create Missing Dimensions** (Scenario 2): Extract dimensions from fact data and create missing entries
-10. **Load Fact**: Load transformed data into fact tables with dimension key lookups
-    - **Scenario 1 Support**: Track before/after states and dashboard KPIs (if enabled)
-    - **Scenario 4 Support**: Invalid data captured in reject tables
-11. **Views**: Create analytical views for BI tools
+3. **Date Dimension**: Populate date dimension (prerequisite for facts)
+4. **Ingest**: Load raw data per department into staging tables (parallel execution, incremental loading)
+5. **Extract**: Extract data from staging tables into pandas DataFrames
+6. **Transform**: Clean and transform extracted data
+7. **Load Dim**: Load transformed data into dimension tables (from separate dimension files)
+8. **Create Missing Dimensions** (Scenario 2): Extract dimensions from fact data and create missing entries
+9. **Load Fact**: Load transformed data into fact tables with dimension key lookups
+   - **Scenario 1 Support**: Track before/after states and dashboard KPIs (if enabled)
+   - **Scenario 4 Support**: Invalid data captured in reject tables
+10. **Views**: Create analytical views for BI tools
 
 ## Workflow Diagram
 
@@ -55,18 +52,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 3: Pre-Process to Parquet (Optional)                      │
-│  ────────────────────────────────────────────────────────────   │
-│  • Convert raw files to cleaned parquet format                  │
-│  • Only processes new/changed files                             │
-│  • Stores parquet in data/cleaned/ directory                    │
-│  • Source: scripts/preprocess_to_parquet.py                     │
-│  • Note: Non-blocking - ingestion continues if this fails       │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  TASK 4: Populate Date Dimension                                │
+│  TASK 3: Populate Date Dimension                                │
 │  ────────────────────────────────────────────────────────────   │
 │  • Generate date dimension (2020-01-01 to 2025-12-31)           │
 │  • Populate time attributes (year, month, quarter, etc.)        │
@@ -75,7 +61,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 5: Ingest Data Per Department → Staging                   │
+│  TASK 4: Ingest Data Per Department → Staging                   │
 │  ────────────────────────────────────────────────────────────   │
 │  • Marketing: campaign data, transactional campaign data        │
 │  • Operations: order data, line items, delays                   │
@@ -87,7 +73,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 6: Extract                                                │
+│  TASK 5: Extract                                                │
 │  ────────────────────────────────────────────────────────────   │
 │  • Read data from staging tables                                │
 │  • Load into pandas DataFrames                                  │
@@ -97,7 +83,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 7: Transform                                              │
+│  TASK 6: Transform                                              │
 │  ────────────────────────────────────────────────────────────   │
 │  • Clean and format data                                        │
 │  • Normalize values (product types, discounts, etc.)            │
@@ -108,7 +94,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 8: Load Dimensions                                        │
+│  TASK 7: Load Dimensions                                        │
 │  ────────────────────────────────────────────────────────────   │
 │  • Load into dim_campaign                                       │
 │  • Load into dim_product                                        │
@@ -122,7 +108,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 9: Create Missing Dimensions (Scenario 2)                 │
+│  TASK 8: Create Missing Dimensions (Scenario 2)                 │
 │  ────────────────────────────────────────────────────────────   │
 │  • Extract unique user_ids from order data                      │
 │  • Extract unique product_ids from line item data               │
@@ -133,7 +119,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 10: Load Facts                                            │
+│  TASK 9: Load Facts                                             │
 │  ────────────────────────────────────────────────────────────   │
 │  • Load into fact_orders with dimension key lookups             │
 │  • Load into fact_line_items with dimension key lookups         │
@@ -144,7 +130,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TASK 11: Create Analytical Views                               │
+│  TASK 10: Create Analytical Views                               │
 │  ────────────────────────────────────────────────────────────   │
 │  • vw_campaign_performance                                      │
 │  • vw_merchant_performance                                      │
@@ -170,20 +156,19 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
 
 ### Sequential Dependencies
 1. **Create Schema** → **Create Staging Tables**: Schema must exist first
-2. **Create Staging Tables** → **Pre-Process to Parquet**: Tables must exist (optional step)
-3. **Pre-Process to Parquet** → **Populate Date Dimension**: Pre-processing completes (non-blocking)
-4. **Populate Date Dimension** → **Ingest Data**: Date dimension needed for fact tables
-5. **Ingest Data** → **Extract**: All staging data must be loaded before extraction
-6. **Extract** → **Transform**: Extracted data needed for transformation
-7. **Transform** → **Load Dimensions**: Transformed data needed for dimensions
-8. **Load Dimensions** → **Create Missing Dimensions**: Load dimensions from files first
-9. **Create Missing Dimensions** → **Load Facts**: All dimensions (including new ones) must exist
-10. **Load Facts** → **Create Analytical Views**: Views created after all data is loaded
+2. **Create Staging Tables** → **Populate Date Dimension**: Tables must exist
+3. **Populate Date Dimension** → **Ingest Data**: Date dimension needed for fact tables
+4. **Ingest Data** → **Extract**: All staging data must be loaded before extraction
+5. **Extract** → **Transform**: Extracted data needed for transformation
+6. **Transform** → **Load Dimensions**: Transformed data needed for dimensions
+7. **Load Dimensions** → **Create Missing Dimensions**: Load dimensions from files first
+8. **Create Missing Dimensions** → **Load Facts**: All dimensions (including new ones) must exist
+9. **Load Facts** → **Create Analytical Views**: Views created after all data is loaded
 
 ## Detailed Stage Descriptions
 
 ### Stage 1: Schema Creation
-- **Input**: Physical model definition (`docs/PHYSICALMODEL.txt`)
+- **Input**: Physical model definition (`docs/LOGICAL-PHYSICALMODEL.txt`)
 - **Process**: 
   - Create all dimension and fact table structures
   - Define primary keys, foreign keys, and constraints
@@ -206,29 +191,15 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
   - Populate date dimension table
 - **Output**: Populated `dim_date` table
 
-### Stage 3: Pre-Process to Parquet (Optional)
+### Stage 4: Data Ingestion (Per Department)
 - **Input**: Raw files from `/opt/airflow/data` directory
 - **Process**:
-  - Converts raw files (CSV, HTML, JSON, Excel, Pickle) to cleaned parquet format
-  - Applies data cleaning and formatting
-  - Stores parquet files in `data/cleaned/` directory
-  - Only reprocesses files that changed (checks modification time)
-  - Excludes `data/Test/` folder from processing
-- **Output**: Cleaned parquet files for faster ingestion
-- **Note**: Non-blocking - if this step fails, ingestion continues with raw files
-
-### Stage 4: Data Ingestion (Per Department)
-- **Input**: Raw files or parquet files from `/opt/airflow/data` directory
-- **Process**:
-  - Automatically prefers parquet files if available and up-to-date
-  - Falls back to raw files if parquet doesn't exist
   - **Marketing Department**: Load campaign data and transactional campaign data
   - **Operations Department**: Load order data, line item prices, line item products, order delays
   - **Business Department**: Load product list
   - **Customer Management Department**: Load user data, user jobs, credit cards
   - **Enterprise Department**: Load merchant data, staff data, order-merchant mappings
   - Files are loaded directly into staging tables with minimal transformation
-  - Original file paths tracked in `file_source` column (not parquet paths)
 - **Output**: Populated staging tables
 
 ### Stage 5: Extract
@@ -257,7 +228,15 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
   - Handle duplicates with `ON CONFLICT` clauses
 - **Output**: Populated dimension tables
 
-### Stage 10: Load Facts
+### Stage 8: Create Missing Dimensions (Scenario 2)
+
+- **Input**: Transformed fact-shaped data (orders + line items)
+- **Process**:
+  - Create missing `dim_user` rows from order data
+  - Create missing `dim_product` rows from line item data
+- **Output**: Dimensions are complete enough for fact loading (no broken FKs)
+
+### Stage 9: Load Facts
 - **Input**: Transformed data from staging, populated dimension tables
 - **Process**:
   - **Scenario 2 Support**: Create missing dimensions from fact data
@@ -274,7 +253,7 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
   - **Scenario 3 Support**: Unknown campaign handling for late-arriving campaign data
 - **Output**: Populated fact tables and reject tables (if invalid data found)
 
-### Stage 11: Create Analytical Views
+### Stage 10: Create Analytical Views
 - **Input**: Populated dimension and fact tables
 - **Process**:
   - Create SQL views for common analytical queries
@@ -296,7 +275,6 @@ Schema → Staging → Pre-Process to Parquet → Date Dimension → Ingest → 
 
 ## Performance Optimization
 
-- **Parquet Pre-Processing**: 3-12x faster ingestion by using columnar format (optional)
 - **Staging Layer**: Allows parallel ingestion and transformation
 - **Incremental Loading**: Only processes new/changed files (see [Incremental Loading](INCREMENTAL_LOADING.md))
 - **Bulk Inserts**: Data inserted in batches using SQLAlchemy transactions
@@ -316,7 +294,7 @@ export ENABLE_SCENARIO1_METRICS=true
 export TARGET_DATE=2024-01-15
 ```
 
-See [Scenario 1 Implementation](../testing-scenarios/SCENARIO1_IMPLEMENTATION.md) for details.
+See `docs/core/SCENARIOS.md` for demo-ready Scenario 1–5 datasets and verification steps.
 
 ### Scenario 2: New Customer and Product Creation
 
@@ -348,17 +326,11 @@ Verifies analytical layer consistency:
 
 The ingestion pipeline supports multiple file formats:
 - **CSV**: Tab-separated and comma-separated, with automatic separator detection
-- **Parquet**: Columnar format for efficient reading (preferred when available)
+- **Parquet**: Columnar format for efficient reading
 - **JSON**: Nested JSON structures
 - **Excel**: .xlsx and .xls files
 - **Pickle**: Python serialized objects
 - **HTML**: HTML tables extracted using pandas.read_html
-
-**Parquet Pre-Processing:**
-- Raw files can be pre-processed to parquet format for faster ingestion
-- Parquet files stored in `data/cleaned/` directory
-- Ingestion automatically uses parquet if available and up-to-date
-- Falls back to raw files if parquet doesn't exist
 
 ## Benefits of New Workflow
 

@@ -1,0 +1,11 @@
+,order_id,product_name,product_id
+0,scenario4-order-valid-001,Valid Product for Scenario 4,PRODUCT16794
+1,scenario4-order-invalid-merchant,Product for Invalid Merchant,PRODUCT56387
+2,scenario4-order-invalid-date,Product for Invalid Date,PRODUCT26612
+3,scenario4-order-missing-user,Product for Missing User,PRODUCT17344
+4,scenario4-order-valid-002,Another Valid Product,PRODUCT42855
+5,scenario4-order-invalid-date2,Product for Invalid Date 2,PRODUCT47927
+6,scenario4-order-invalid-staff,Product for Invalid Staff,PRODUCT57150
+7,scenario4-order-invalid-product,Product with Invalid ID,INVALID_PRODUCT999
+8,scenario4-order-invalid-product2,Product with Missing ID,
+

@@ -8,7 +8,7 @@ This document provides a comprehensive data inventory and profiling report for t
 
 ---
 
-## 📁 Overall Data Landscape
+## Overall Data Landscape
 
 - **Source Departments**: Marketing, Operations, Business, Customer Management, Enterprise
 - **File Formats**: CSV, Parquet, JSON, Pickle, Excel (.xlsx), HTML
@@ -18,7 +18,7 @@ This document provides a comprehensive data inventory and profiling report for t
 
 ---
 
-## 📊 Department-by-Department Summary
+## Department-by-Department Summary
 
 ### 1. Marketing Department
 
@@ -28,15 +28,15 @@ This document provides a comprehensive data inventory and profiling report for t
 - **Issues Identified**:
   - Discount field has inconsistent formats (`1%`, `1pct`, `10%%` typo)
   - **ETL Handling**: `parse_discount()` function normalizes all formats
-- **Status**: ✅ Cleaned and loaded into `dim_campaign`
+- **Status**: Cleaned and loaded into `dim_campaign`
 
 #### `transactional_campaign_data.csv`
 - **Rows**: ~125,000 transactions
-- **Columns**: 6 (order_id, campaign_id, user_id, merchant_id, transaction_date, availed)
+- **Columns**: 6 (transaction_date, campaign_id, order_id, estimated arrival, availed, [index])
 - **Characteristics**:
   - 70% campaign uptake (`availed = 1`)
   - `estimated arrival` is textual; needs conversion to numeric
-- **Status**: ✅ Loaded into `fact_campaign_transactions`
+- **Status**: Loaded into `fact_campaign_transactions`
 
 ---
 
@@ -50,7 +50,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Quantity field has inconsistent suffixes (`pcs`, `pieces`, `PC`)
   - Prices vary across files (expected - different time periods)
   - **ETL Handling**: `extract_numeric()` function handles all quantity formats
-- **Status**: ✅ Merged by row position and loaded into `fact_line_items`
+- **Status**: Merged by row position and loaded into `fact_line_items`
 
 #### Order Data (6 files across formats)
 - **Files**:
@@ -65,7 +65,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Schema mostly consistent
   - Some files have extra `Unnamed: 0` index columns
   - **ETL Handling**: `clean_dataframe()` automatically removes index columns
-- **Status**: ✅ Loaded into `fact_orders`
+- **Status**: Loaded into `fact_orders`
 
 #### `order_delays.html`
 - **Rows**: ~200,000 delay records
@@ -73,7 +73,7 @@ This document provides a comprehensive data inventory and profiling report for t
 - **Characteristics**:
   - `delay_days` as integer (0-9 days)
   - Can be joined with order/merchant data for operational analytics
-- **Status**: ✅ Merged with order data in `fact_orders`
+- **Status**: Merged with order data in `fact_orders`
 
 ---
 
@@ -91,7 +91,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - **ETL Handling**: 
     - `format_product_type()` function normalizes variations
     - SQL script `14_fix_product_type_normalization.sql` fixes existing data
-- **Status**: ✅ Loaded into `dim_product` with normalization
+- **Status**: Loaded into `dim_product` with normalization
 
 ---
 
@@ -104,7 +104,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - 1,629 missing `job_level` values (mostly for `"Student"` job titles)
   - Index column (`Unnamed: 0`) present
   - **ETL Handling**: Index columns automatically removed
-- **Status**: ✅ Loaded into `dim_user_job`
+- **Status**: Loaded into `dim_user_job`
 
 #### `user_data.json`
 - **Rows**: 5,000 users
@@ -113,7 +113,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Clean, flat JSON structure
   - Balanced gender distribution
   - Three user types: `basic`, `verified`, `premium`
-- **Status**: ✅ Loaded into `dim_user`
+- **Status**: Loaded into `dim_user`
 
 #### `user_credit_card.pickle`
 - **Rows**: 5,000 credit card records
@@ -122,7 +122,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Clean data
   - Card numbers stored as integers (converted to strings in ETL)
   - 8 unique issuing banks
-- **Status**: ✅ Loaded into `dim_credit_card`
+- **Status**: Loaded into `dim_credit_card`
 
 ---
 
@@ -135,7 +135,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Global staff across 249 countries
   - `contact_number` formatting inconsistent
   - **ETL Handling**: `format_phone_number()` standardizes phone formats
-- **Status**: ✅ Loaded into `dim_staff`
+- **Status**: Loaded into `dim_staff`
 
 #### `merchant_data.html`
 - **Rows**: 5,000 merchants
@@ -144,7 +144,7 @@ This document provides a comprehensive data inventory and profiling report for t
   - Global merchants across 249 countries
   - `contact_number` needs normalization
   - **ETL Handling**: `format_phone_number()` standardizes phone formats
-- **Status**: ✅ Loaded into `dim_merchant`
+- **Status**: Loaded into `dim_merchant`
 
 #### `order_with_merchant_data` (3 files)
 - **Files**:
@@ -157,12 +157,12 @@ This document provides a comprehensive data inventory and profiling report for t
   - Clean and referentially consistent
   - Some files have extra index columns (`Unnamed: 0`)
   - Used for joining orders with merchant/staff information
-- **Status**: ✅ Merged with order data in `fact_orders`
-- **Note**: ⚠️ These files are **excluded** from `dim_merchant` loading (only contain merchant_id, not full merchant details)
+- **Status**: Merged with order data in `fact_orders`
+- **Note**: These files are excluded from `dim_merchant` loading (they do not contain full merchant attributes)
 
 ---
 
-## ⚠️ Common Data Quality Issues & ETL Solutions
+## Common Data Quality Issues & ETL Solutions
 
 ### 1. Inconsistent Text Formats
 
@@ -216,23 +216,23 @@ This document provides a comprehensive data inventory and profiling report for t
 
 ---
 
-## ✅ Data Quality Assessment
+## Data Quality Assessment
 
 ### Strengths
-- ✅ **High Completeness**: Most fields have >99% completeness
-- ✅ **No Duplicates**: Referential integrity maintained
-- ✅ **Strong Relationships**: Order-merchant-staff relationships are consistent
-- ✅ **Well-Structured**: Clear schema across all files
-- ✅ **Time-Series Coverage**: Complete coverage from 2020-2024
+- **High completeness**: Most fields have >99% completeness
+- **No duplicates**: Referential integrity maintained
+- **Strong relationships**: Order-merchant-staff relationships are consistent
+- **Well-structured**: Clear schema across all files
+- **Time-series coverage**: Complete coverage from 2020-2024
 
 ### Areas Requiring Attention
-- ⚠️ **Text Normalization**: Handled by ETL functions
-- ⚠️ **Product Type Variations**: Fixed by normalization function
-- ⚠️ **Missing Job Levels**: Expected for "Student" job titles (acceptable NULLs)
+- **Text normalization**: Handled by ETL functions
+- **Product type variations**: Fixed by normalization function
+- **Missing job levels**: Expected for "Student" job titles (acceptable NULLs)
 
 ---
 
-## 📈 Data Volume Summary
+## Data Volume Summary
 
 | Department | Files | Total Rows | Primary Use |
 |------------|-------|------------|-------------|
@@ -245,7 +245,7 @@ This document provides a comprehensive data inventory and profiling report for t
 
 ---
 
-## 🔄 ETL Data Flow
+## ETL Data Flow
 
 ```
 Source Files → clean_dataframe() → format_*() functions → Dimension/Fact Tables
@@ -262,7 +262,7 @@ Source Files → clean_dataframe() → format_*() functions → Dimension/Fact T
 
 ---
 
-## 📝 Notes for Data Analysts
+## Notes for Data Analysts
 
 ### When Querying Views
 - Use `vw_sales_by_time` for **date-filtered** queries
@@ -277,7 +277,7 @@ Source Files → clean_dataframe() → format_*() functions → Dimension/Fact T
 
 ---
 
-## 🔍 Data Profiling Queries
+## Data Profiling Queries
 
 ### Check Product Type Distribution
 ```sql

@@ -47,17 +47,17 @@ By default, incremental loading is **enabled** (`FORCE_FULL_RELOAD=false`).
 
 ## Benefits
 
-### ✅ **Performance**
+### Performance
 - Only processes new/changed files
 - Faster pipeline execution
 - Reduced database load
 
-### ✅ **No Duplicates**
+### No duplicates
 - Prevents duplicate data in staging tables
 - Cleaner data warehouse
 - Reduced storage usage
 
-### ✅ **Smart Updates**
+### Smart updates
 - Automatically detects file changes
 - Re-processes updated files
 - Handles file updates gracefully
@@ -67,13 +67,13 @@ By default, incremental loading is **enabled** (`FORCE_FULL_RELOAD=false`).
 ### Normal Run (Incremental)
 ```bash
 # Default behavior - only processes new/changed files
-python -m scripts.ingest
+python scripts/ingest.py
 ```
 
 ### Force Full Reload
 ```bash
 # Process all files regardless of status
-FORCE_FULL_RELOAD=true python -m scripts.ingest
+FORCE_FULL_RELOAD=true python scripts/ingest.py
 ```
 
 ### In Airflow DAG

@@ -161,7 +161,7 @@ The data warehouse follows a **Star Schema** design with:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| order_id | INTEGER | Order identifier |
+| order_id | TEXT | Order identifier (business key from source files) |
 | user_sk | INTEGER (FK) | References dim_user |
 | merchant_sk | INTEGER (FK) | References dim_merchant |
 | staff_sk | INTEGER (FK) | References dim_staff |
@@ -182,7 +182,7 @@ The data warehouse follows a **Star Schema** design with:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| order_id | INTEGER | Order identifier |
+| order_id | TEXT | Order identifier |
 | product_sk | INTEGER (FK) | References dim_product |
 | user_sk | INTEGER (FK) | References dim_user |
 | merchant_sk | INTEGER (FK) | References dim_merchant |
@@ -204,7 +204,7 @@ The data warehouse follows a **Star Schema** design with:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| order_id | INTEGER | Order identifier |
+| order_id | TEXT | Order identifier |
 | campaign_sk | INTEGER (FK) | References dim_campaign |
 | user_sk | INTEGER (FK) | References dim_user |
 | merchant_sk | INTEGER (FK) | References dim_merchant |

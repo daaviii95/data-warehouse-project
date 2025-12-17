@@ -1,4 +1,4 @@
-# ShopZada Data Warehouse Architecture
+# ShopZada Data Warehouse Architecture (Aperture)
 
 ## Overview
 
@@ -34,7 +34,7 @@ ShopZada's Data Warehouse solution follows the **Kimball Methodology** with a mu
 - `fact_line_items`: Order line items with product details
 - `fact_campaign_transactions`: Campaign usage tracking
 
-### 4. Analytical Layer (Presentation)
+### 3. Analytical Layer (Presentation)
 - **SQL Views**: Pre-aggregated analytical views
 - **Business Intelligence**: Ready for Tableau, Power BI, or Looker Studio
 
@@ -49,14 +49,12 @@ ShopZada's Data Warehouse solution follows the **Kimball Methodology** with a mu
 ## Data Flow
 
 ```
-Data Sources → Pre-Process to Parquet (Optional) → Staging Tables → Extract → Transform → Load Dimensions → Create Missing Dims → Load Facts → Analytical Views → BI Tools
+Data Sources → Staging Tables → Extract → Transform → Load Dimensions → Create Missing Dims → Load Facts → Analytical Views → BI Tools
 ```
 
 **Current Implementation:**
-- **Parquet Pre-Processing**: Optional step that converts raw files to cleaned parquet format for 3-12x faster ingestion
 - **Staging-Based ETL**: Data is first ingested into staging tables, then extracted, transformed, and loaded
 - **Incremental Loading**: Only processes new/changed files (see [Incremental Loading](INCREMENTAL_LOADING.md))
-- **Automatic Fallback**: Ingestion automatically uses parquet if available, falls back to raw files
 - **Scenario 2 Support**: Automatically creates missing dimensions from fact data
 - **Scenario 1 Support**: Optional before/after state tracking and dashboard KPI monitoring
 - **File Support**: CSV (tab/comma-separated), Parquet, JSON, Excel, Pickle, HTML
@@ -66,17 +64,15 @@ Data Sources → Pre-Process to Parquet (Optional) → Staging Tables → Extrac
 1. **Kimball Methodology**: Chosen for business-user-friendly star schemas and rapid development
 2. **Surrogate Keys**: All dimensions use auto-incrementing surrogate keys (SK) for SCD handling
 3. **Date Dimension**: Pre-populated time dimension for consistent time-based analysis
-4. **Parquet Pre-Processing**: Optional optimization that converts raw files to cleaned parquet for faster ingestion
-5. **Staging Layer**: Data first loaded into staging tables for separation of concerns and debugging
-6. **Incremental Loading**: Tracks processed files to avoid duplicate processing
-7. **Late-Arriving Dimensions** (Scenario 2): Creates missing dimensions from fact data automatically
-8. **Pipeline Metrics** (Scenario 1): Optional before/after state tracking for validation
-9. **Data Quality**: Reject tables capture invalid data while valid data proceeds (Scenario 4)
-10. **Idempotent Operations**: All ETL operations use `ON CONFLICT` clauses for safe re-runs
+4. **Staging Layer**: Data first loaded into staging tables for separation of concerns and debugging
+5. **Incremental Loading**: Tracks processed files to avoid duplicate processing
+6. **Late-Arriving Dimensions** (Scenario 2): Creates missing dimensions from fact data automatically
+7. **Pipeline Metrics** (Scenario 1): Optional before/after state tracking for validation
+8. **Data Quality**: Reject tables capture invalid data while valid data proceeds (Scenario 4)
+9. **Idempotent Operations**: All ETL operations use `ON CONFLICT` clauses for safe re-runs
 
 ## Scalability Considerations
 
-- **Parquet Pre-Processing**: 3-12x faster ingestion by using columnar format
 - **Horizontal Scaling**: Airflow supports distributed execution
 - **Partitioning**: Fact tables can be partitioned by date
 - **Indexing**: Strategic indexes on foreign keys and date columns
@@ -84,13 +80,13 @@ Data Sources → Pre-Process to Parquet (Optional) → Staging Tables → Extrac
 - **Incremental Loading**: Only processes new/changed files for better performance
 - **Connection Pooling**: SQLAlchemy connection pooling for efficient database operations
 
-## Scenario Support
+## Scenario support
 
 ### Scenario 1: End-to-End Pipeline Test
 - **Purpose**: Validate incremental batch loading and end-to-end data flow
 - **Features**: Before/after state tracking, dashboard KPI monitoring, pipeline summary
 - **Enable**: Set `ENABLE_SCENARIO1_METRICS=true` environment variable
-- **Documentation**: [Scenario 1 Implementation](../testing-scenarios/SCENARIO1_IMPLEMENTATION.md)
+- **Demo guide**: `docs/core/SCENARIOS.md` (Scenario 1)
 
 ### Scenario 2: New Customer and Product Creation
 - **Purpose**: Handle late-arriving dimensions (customers/products appearing only in order data)

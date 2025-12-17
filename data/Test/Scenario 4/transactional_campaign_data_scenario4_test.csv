@@ -1,0 +1,6 @@
+,transaction_date,campaign_id,order_id,estimated arrival,availed
+0,2024-01-30,CAMPAIGN46302,scenario4-order-valid-001,10days,1
+1,2024-01-30,CAMPAIGN29983,scenario4-order-valid-002,12days,1
+2,invalid-date-format,CAMPAIGN46302,scenario4-order-valid-001,8days,0
+3,2024-01-30,CAMPAIGN46302,scenario4-order-nonexistent,15days,1
+

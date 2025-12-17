@@ -1,0 +1,9 @@
+,order_id,user_id,estimated arrival,transaction_date
+0,scenario4-order-valid-001,USER28531,10days,2024-01-30
+1,scenario4-order-invalid-merchant,USER56935,12days,2024-01-30
+2,scenario4-order-invalid-date,USER11824,8days,2024-13-45
+3,scenario4-order-missing-user,,15days,2024-01-30
+4,scenario4-order-valid-002,USER51578,7days,2024-01-30
+5,scenario4-order-invalid-date2,USER56319,9days,not-a-date
+6,scenario4-order-invalid-staff,USER34008,11days,2024-01-30
+

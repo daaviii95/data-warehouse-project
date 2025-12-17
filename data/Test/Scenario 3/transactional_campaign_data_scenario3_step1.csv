@@ -1,0 +1,6 @@
+,transaction_date,campaign_id,order_id,estimated arrival,availed
+0,2024-01-25,SCENARIO3_CAMPAIGN001,scenario3-order-001,10days,1
+1,2024-01-25,SCENARIO3_CAMPAIGN002,scenario3-order-002,12days,1
+2,2024-01-25,SCENARIO3_CAMPAIGN003,scenario3-order-003,8days,0
+
+

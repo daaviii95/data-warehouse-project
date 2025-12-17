@@ -1,0 +1,9 @@
+,order_id,merchant_id,staff_id
+0,scenario4-order-valid-001,MERCHANT13004,STAFF0009879
+1,scenario4-order-invalid-merchant,INVALID_MERCHANT999,STAFF0009879
+2,scenario4-order-invalid-date,MERCHANT13004,STAFF0009879
+3,scenario4-order-missing-user,MERCHANT13004,STAFF0009879
+4,scenario4-order-valid-002,MERCHANT17176,STAFF0045676
+5,scenario4-order-invalid-date2,MERCHANT13004,STAFF0009879
+6,scenario4-order-invalid-staff,MERCHANT13004,INVALID_STAFF999
+

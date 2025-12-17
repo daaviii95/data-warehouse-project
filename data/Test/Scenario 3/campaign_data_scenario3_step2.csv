@@ -1,0 +1,4 @@
+	campaign_id	campaign_name	campaign_description	discount
+0	SCENARIO3_CAMPAIGN001	Scenario 3 Late Campaign Alpha	Test campaign that arrives late in the dimension table	15%
+1	SCENARIO3_CAMPAIGN002	Scenario 3 Late Campaign Beta	Another test campaign for late-arriving dimension testing	20%
+2	SCENARIO3_CAMPAIGN003	Scenario 3 Late Campaign Gamma	Third test campaign demonstrating late dimension arrival	10%

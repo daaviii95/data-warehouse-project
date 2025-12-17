@@ -23,7 +23,7 @@ SELECT
     discount,
     total_orders,
     unique_customers,
-    availed_percentage,
+    campaign_avail_rate_pct,
     total_revenue,
     avg_order_value
 FROM vw_campaign_performance
@@ -66,8 +66,8 @@ Operations and business development teams need to understand merchant performanc
 ```sql
 SELECT 
     merchant_name,
-    city,
-    state,
+    merchant_city,
+    merchant_state,
     total_orders,
     total_revenue,
     avg_order_value,
@@ -116,10 +116,8 @@ Marketing and sales teams need to identify high-value customer segments for targ
 ```sql
 -- Top customers by revenue
 SELECT 
-    customer_name,
-    user_type,
-    job_title,
-    job_level,
+    customer_segment,
+    customer_country,
     customer_city,
     total_orders,
     total_revenue,
@@ -131,25 +129,16 @@ LIMIT 50;
 
 -- Revenue by user type
 SELECT 
-    user_type,
-    COUNT(*) AS customer_count,
+    customer_segment,
     SUM(total_revenue) AS segment_revenue,
-    AVG(total_revenue) AS avg_customer_revenue,
-    AVG(total_orders) AS avg_orders_per_customer
+    SUM(total_orders) AS segment_orders,
+    SUM(unique_customers) AS segment_customers
 FROM vw_customer_segment_revenue
-GROUP BY user_type
+GROUP BY customer_segment
 ORDER BY segment_revenue DESC;
 
--- Revenue by job level
-SELECT 
-    job_level,
-    COUNT(*) AS customer_count,
-    SUM(total_revenue) AS segment_revenue,
-    AVG(total_revenue) AS avg_customer_revenue
-FROM vw_customer_segment_revenue
-WHERE job_level IS NOT NULL
-GROUP BY job_level
-ORDER BY segment_revenue DESC;
+-- Note: job_title/job_level live in separate tables and are not included in vw_customer_segment_revenue.
+-- If you need job-level analysis, join dim_user_job to dim_user and then to facts.
 ```
 
 **Insights Provided:**

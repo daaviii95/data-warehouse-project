@@ -1,0 +1,11 @@
+,order_id,price,quantity
+0,scenario4-order-valid-001,19.99,2pcs
+1,scenario4-order-invalid-merchant,25.50,1piece
+2,scenario4-order-invalid-date,15.75,3pcs
+3,scenario4-order-missing-user,30.00,2pcs
+4,scenario4-order-valid-002,22.50,1piece
+5,scenario4-order-invalid-date2,18.25,2pcs
+6,scenario4-order-invalid-staff,19.99,2pcs
+7,scenario4-order-invalid-product,19.99,2pcs
+8,scenario4-order-invalid-product2,25.50,1piece
+

@@ -23,11 +23,11 @@ The analytical views have been separated into their own DAG (`shopzada_analytica
 ### When to Use
 
 Run `shopzada_analytical_views` DAG when you need to:
-- ✅ Refresh views after updating view definitions in `sql/03_create_analytical_views.sql`
-- ✅ Regenerate views after data corrections
-- ✅ Update views after schema changes
-- ✅ Quick refresh before dashboard updates
-- ❌ **NOT needed** after regular ETL runs (views are automatically created)
+- Refresh views after updating view definitions in `sql/03_create_analytical_views.sql`
+- Regenerate views after data corrections
+- Update views after schema changes
+- Quick refresh before dashboard updates
+- Quickly re-create views without re-running the full pipeline
 
 ### DAG Details
 
@@ -50,12 +50,11 @@ The DAG creates/refreshes these analytical views:
 
 ## Main ETL Pipeline
 
-The main ETL pipeline (`shopzada_etl_pipeline`) now:
-- Creates schema
-- Populates date dimension
-- Runs Python ETL (loads all data)
-- Runs data quality checks
-- **Does NOT** create analytical views (use separate DAG)
+The main ETL pipeline (`shopzada_etl_pipeline`) includes an **analytical views** task at the end, so views are created after a successful full ETL run.
+
+This separate DAG is still valuable for fast view refreshes when:
+- you changed `sql/03_create_analytical_views.sql`, or
+- you want to regenerate views without re-ingesting data.
 
 ## Workflow Comparison
 
@@ -93,11 +92,11 @@ Analytical Views (separate DAG)
 ## Files
 
 1. **`workflows/shopzada_analytical_views.py`** - Separate DAG for analytical views
-2. **`workflows/shopzada_etl_pipeline.py`** - Main ETL pipeline (does not include analytical views)
+2. **`workflows/shopzada_etl_pipeline.py`** - Main ETL pipeline (includes analytical view creation at the end)
 
 ## Notes
 
-- Views are automatically created as part of the main ETL pipeline
+- Views are created at the end of `shopzada_etl_pipeline`
 - This separate DAG allows quick refresh without running full ETL
 - Views are idempotent - safe to run multiple times
 
